@@ -8,6 +8,8 @@ import logger from './lib/logger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { httpLogger } from './middleware/logging.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { toNodeHandler } from 'better-auth/node';
+import { auth } from './lib/betterAuth.js';
 import routes from './routes/index.js';
 
 declare global {
@@ -48,6 +50,9 @@ const limiter = rateLimit({
   },
 });
 app.use(limiter);
+
+// Better Auth handler mounted before body parser
+app.use("/api/auth", toNodeHandler(auth));
 
 // Basic middleware
 app.use(compression());

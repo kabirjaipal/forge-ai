@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String            @id @default(uuid())
+  name              String
+  email             String            @unique
+  emailVerified     Boolean           @default(false)
+  image             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  sessions          Session[]
+  accounts          Account[]
+  createdWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  workspaceMembers  WorkspaceMember[]
+  messages          Message[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verifications")
+}
+
+model Workspace {
+  id            String            @id @default(uuid())
+  name          String
+  slug          String            @unique
+  description   String?
+  ownerId       String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  owner         User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members       WorkspaceMember[]
+  documents     Document[]
+  agents        Agent[]
+  conversations Conversation[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        String    @default("member") // owner, admin, member
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+model Document {
+  id             String           @id @default(uuid())
+  workspaceId    String
+  name           String
+  fileKey        String
+  fileType       String           // pdf, docx, md, csv, txt
+  fileSize       Int
+  status         String           @default("pending") // pending, processing, completed, error
+  errorMessage   String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks         DocumentChunk[]
+  agentKnowledge AgentKnowledge[]
+
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String
+  chunkIndex Int
+  content    String   @db.Text
+  metadata   Json?
+  embedding  String?  @db.Text
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_chunks")
+}
+
+model Agent {
+  id             String           @id @default(uuid())
+  workspaceId    String
+  name           String
+  description    String?
+  avatar         String?
+  systemPrompt   String           @db.Text
+  model          String           @default("gpt-4o-mini")
+  temperature    Float            @default(0.7)
+  isPublic       Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agentTools     AgentTool[]
+  agentKnowledge AgentKnowledge[]
+  conversations  Conversation[]
+
+  @@map("agents")
+}
+
+model Tool {
+  id          String      @id @default(uuid())
+  name        String      @unique // search_docs, web_search, db_query, github_api, weather_api
+  description String
+  schema      Json        // JSON Schema defining input parameters
+  createdAt   DateTime    @default(now())
+  agentTools  AgentTool[]
+
+  @@map("tools")
+}
+
+model AgentTool {
+  agentId String
+  toolId  String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tool    Tool   @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, toolId])
+  @@map("agent_tools")
+}
+
+model AgentKnowledge {
+  agentId    String
+  documentId String
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, documentId])
+  @@map("agent_knowledge")
+}
+
+model Conversation {
+  id          String    @id @default(uuid())
+  workspaceId String
+  agentId     String?
+  title       String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages    Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String?
+  role           String       // user, assistant, system, tool
+  content        String       @db.Text
+  citations      Json?
+  toolCalls      Json?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@map("messages")
+}
