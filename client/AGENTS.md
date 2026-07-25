@@ -30,3 +30,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - Feature-specific components: `@/components/features/` or co-located within feature routes.
 - **Path Aliases**: Always use `@/` path aliases for module imports.
 - **Accessibility & UX**: Ensure components maintain proper ARIA properties, keyboard interaction, and consistent visual focus states.
+
+## 5. Next.js Scope & Backend Boundary Rules
+- **Frontend Presentation Only**: Use Next.js strictly for frontend UI, client-side rendering, layout management, and page navigation.
+- **No Next.js API Routes or Server Actions**: Do NOT create or use Next.js API route handlers (`app/api/...` or `pages/api/...`), Server Actions, or Next.js backend endpoint logic.
+- **External Backend Communication**: All backend operations, business logic, data persistence, and API endpoints must reside in the separate backend server (`server/`). All frontend data fetching must target the dedicated backend API directly.
+
