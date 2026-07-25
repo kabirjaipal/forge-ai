@@ -54,11 +54,12 @@ This document defines core behavioral, architectural, and operational guidelines
 
 ### Component Acquisition Workflow
 1. **Check Local Components**: Check if the required component exists locally in `@/components/ui/`.
-2. **Install via CLI**: If missing locally but available in `shadcn/ui`, install it using the CLI:
+2. **Install via CLI First (Mandatory)**: ALWAYS check if the component exists online in the official `shadcn/ui` collection and install it using the CLI:
    ```bash
    npx shadcn@latest add <component-name>
    ```
-3. **Build Reusable Components**: If no `shadcn` component exists even online for your use case, create a clean, reusable component in `@/components/ui/` or `@/components/common/` using standard `shadcn` architectural patterns (`cva`, `cn()` helper, `forwardRef`, etc.).
+   **NEVER** create or write a component manually first if it already exists in the official `shadcn/ui` registry.
+3. **Build Reusable Components Only as Last Resort**: ONLY if no `shadcn` component exists online for your use case, create a clean, reusable component in `@/components/ui/` or `@/components/common/` using standard `shadcn` architectural patterns (`cva`, `cn()` helper, `forwardRef`, etc.).
 
 ### Styling & Customization Guidelines
 - **No Ad-Hoc Utility Classes on Consuming Components**: Do not pass custom styling/utility classes directly onto `shadcn` component instances in page/feature files for design modifications.

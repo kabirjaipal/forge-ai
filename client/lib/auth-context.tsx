@@ -1,10 +1,10 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authClient, useSession, signIn, signUp, signOut } from './auth-client';
+import { useSession, signIn, signUp, signOut } from './auth-client';
 import { api } from './api';
 
-interface Workspace {
+export interface Workspace {
   id: string;
   name: string;
   slug: string;
@@ -12,22 +12,23 @@ interface Workspace {
   role: string;
 }
 
-interface User {
+export interface User {
   id: string;
   email: string;
   name?: string;
   image?: string;
-  workspaces?: Workspace[];
 }
 
 interface AuthContextType {
   user: User | null;
   currentWorkspace: Workspace | null;
+  workspaces: Workspace[];
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   setCurrentWorkspace: (workspace: Workspace) => void;
+  refreshWorkspaces: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,7 +36,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { data: session, isPending } = useSession();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
-  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(false);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
 
   const user: User | null = session?.user
     ? {
@@ -46,32 +48,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     : null;
 
-  useEffect(() => {
-    if (user?.id) {
-      setIsLoadingWorkspaces(true);
-      api.get<Workspace[]>('/workspaces').then((res) => {
-        if (res.success && res.data && res.data.length > 0) {
+  const fetchWorkspaces = async () => {
+    setIsLoadingWorkspaces(true);
+    try {
+      const res = await api.get<Workspace[]>('/workspaces');
+      if (res.success && res.data) {
+        setWorkspaces(res.data);
+        if (res.data.length > 0 && !currentWorkspace) {
           setCurrentWorkspace(res.data[0]);
         }
-        setIsLoadingWorkspaces(false);
-      }).catch(() => {
-        setIsLoadingWorkspaces(false);
-      });
+      } else {
+        setWorkspaces([]);
+      }
+    } catch {
+      setWorkspaces([]);
+    } finally {
+      setIsLoadingWorkspaces(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchWorkspaces();
     } else {
       setCurrentWorkspace(null);
+      setWorkspaces([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const login = async (email: string, password: string) => {
     try {
-      const res = await signIn.email({
-        email,
-        password,
-      });
-
-      if (res.error) {
-        return { success: false, error: res.error.message || 'Login failed' };
-      }
+      const res = await signIn.email({ email, password });
+      if (res.error) return { success: false, error: res.error.message || 'Login failed' };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Login failed' };
@@ -80,22 +89,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (email: string, password: string, name?: string) => {
     try {
+      // Server auto-creates the workspace via databaseHooks.user.create.after
       const res = await signUp.email({
         email,
         password,
         name: name || email.split('@')[0],
       });
-
-      if (res.error) {
-        return { success: false, error: res.error.message || 'Registration failed' };
-      }
-
-      // Auto-create default workspace via API
-      await api.post('/workspaces', {
-        name: `${name || email.split('@')[0]}'s Workspace`,
-        slug: `ws-${Date.now().toString(36)}`,
-      });
-
+      if (res.error) return { success: false, error: res.error.message || 'Registration failed' };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Registration failed' };
@@ -105,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     signOut();
     setCurrentWorkspace(null);
+    setWorkspaces([]);
   };
 
   return (
@@ -112,11 +113,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         currentWorkspace,
+        workspaces,
         isLoading: isPending || isLoadingWorkspaces,
         login,
         register,
         logout,
         setCurrentWorkspace,
+        refreshWorkspaces: fetchWorkspaces,
       }}
     >
       {children}
@@ -126,8 +129,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }
