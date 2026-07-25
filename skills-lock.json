@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md",
+      "computedHash": "31d149a480eaa68c11e32f5ee77f0fd0b98a906834d531d881d502352edd0b8e"
+    },
+    "fullstack-dev": {
+      "source": "minimax-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/fullstack-dev/SKILL.md",
+      "computedHash": "7cd5ae755a667e445a5a05dcdb6ac2a0a5feae84d183e115a71a8883b2196051"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
+    }
+  }
+}
