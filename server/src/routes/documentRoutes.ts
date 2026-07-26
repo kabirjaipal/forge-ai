@@ -6,11 +6,13 @@ import {
   uploadDocument,
   removeDocument,
   getDocumentDownloadLink,
+  streamDocumentEvents,
 } from '../controllers/documentController.js';
 
 const router = Router({ mergeParams: true });
 
 router.get('/', authenticate, listDocuments);
+router.get('/events', authenticate, streamDocumentEvents);
 router.post('/', authenticate, uploadDocument);
 router.get('/:id', authenticate, getDocument);
 router.get('/:id/download', authenticate, getDocumentDownloadLink);

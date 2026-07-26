@@ -12,12 +12,22 @@ export interface StreamGroqInput {
   onChunk: (chunkText: string) => Promise<void> | void;
 }
 
+export interface GroqUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface StreamGroqOutput {
+  text: string;
+  usage: GroqUsage;
+}
+
 /**
  * Streams completion tokens from Groq API via SSE readable stream.
  * Default model: llama-3.3-70b-versatile
- * Throws explicit errors on API or config failure — NO custom fallback assistant messages.
  */
-export async function streamGroqCompletion(input: StreamGroqInput): Promise<string> {
+export async function streamGroqCompletion(input: StreamGroqInput): Promise<StreamGroqOutput> {
   const { systemPrompt, ragContext, messages, model, temperature, onChunk } = input;
 
   const apiKey = process.env['GROQ_API_KEY'];
@@ -43,7 +53,7 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
 
   const baseUrl = (process.env['GROQ_BASE_URL'] || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
 
-  // 2. Call Groq OpenAI-compatible Chat Completions endpoint with stream: true
+  // 2. Call Groq OpenAI-compatible Chat Completions endpoint with stream: true & include_usage: true
   const response = await globalThis.fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -55,6 +65,7 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
       messages: formattedMessages,
       temperature: targetTemp,
       stream: true,
+      stream_options: { include_usage: true },
     }),
   });
 
@@ -69,6 +80,7 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
 
   // 3. Read SSE stream
   let accumulatedText = '';
+  let usage: GroqUsage | null = null;
   const reader = response.body.getReader();
   const decoder = new globalThis.TextDecoder('utf-8');
   let buffer = '';
@@ -90,9 +102,19 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
         try {
           const jsonStr = trimmed.slice(6);
           const parsed = JSON.parse(jsonStr) as {
-            choices: Array<{ delta?: { content?: string } }>;
+            choices?: Array<{ delta?: { content?: string } }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
           };
-          const deltaContent = parsed.choices[0]?.delta?.content;
+
+          if (parsed.usage) {
+            usage = {
+              promptTokens: parsed.usage.prompt_tokens || 0,
+              completionTokens: parsed.usage.completion_tokens || 0,
+              totalTokens: parsed.usage.total_tokens || 0,
+            };
+          }
+
+          const deltaContent = parsed.choices?.[0]?.delta?.content;
           if (deltaContent) {
             accumulatedText += deltaContent;
             await onChunk(deltaContent);
@@ -108,5 +130,8 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
     throw new Error('AI returned an empty response.');
   }
 
-  return accumulatedText;
+  return {
+    text: accumulatedText,
+    usage: usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  };
 }

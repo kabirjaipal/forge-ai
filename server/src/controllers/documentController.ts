@@ -12,6 +12,7 @@ import {
   getExtension,
   isAllowedFileType,
   getDocumentDownloadUrl,
+  documentEventEmitter,
 } from '../services/documentService.js';
 import { uploadFileToStorage } from '../lib/storage.js';
 
@@ -103,4 +104,37 @@ export const removeDocument = asyncHandler(async (req: AuthRequest, res: Respons
   const { workspaceId, id } = req.params as { workspaceId: string; id: string };
   await deleteDocument(id, workspaceId, req.user.id);
   res.json({ success: true, data: { deleted: true } });
+});
+
+export const streamDocumentEvents = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  const workspaceId = req.params['workspaceId']!;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sendEvent = (data: unknown) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as any).flush === 'function') {
+      (res as any).flush();
+    }
+  };
+
+  sendEvent({ type: 'connected', workspaceId });
+
+  const onUpdate = (eventData: any) => {
+    if (eventData.workspaceId === workspaceId) {
+      sendEvent(eventData);
+    }
+  };
+
+  documentEventEmitter.on('document_update', onUpdate);
+
+  req.on('close', () => {
+    documentEventEmitter.off('document_update', onUpdate);
+  });
 });

@@ -126,6 +126,9 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
 
     const sendEvent = (event: string, data: unknown) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
     };
 
     sendEvent('start', { conversationId: id, ragMatchesCount: ragMatches.length });
@@ -139,92 +142,26 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     const executedToolResults: string[] = [];
     const lowerContent = content.toLowerCase();
 
-    // Natural language & @mention intent detection for MCP Tools
+    // Execute tools ONLY when explicitly mentioned via their exact name: @web_search or @weather_api
     const mcpToolsToRun = new Set<string>();
 
-    // 1. Web Search Tool Detection
-    if (
-      lowerContent.includes('@web_search') ||
-      lowerContent.includes('@search_web') ||
-      lowerContent.includes('@google') ||
-      lowerContent.includes('search online') ||
-      lowerContent.includes('search web') ||
-      lowerContent.includes('online search') ||
-      lowerContent.includes('web search') ||
-      lowerContent.includes('latest news') ||
-      lowerContent.includes('current event')
-    ) {
+    if (lowerContent.includes('@web_search')) {
       mcpToolsToRun.add('web_search');
     }
 
-    // 2. Document RAG Search Tool Detection
-    if (
-      lowerContent.includes('@search_docs') ||
-      lowerContent.includes('@search_documents') ||
-      lowerContent.includes('@docs') ||
-      lowerContent.includes('search docs') ||
-      lowerContent.includes('search documents') ||
-      lowerContent.includes('knowledge base') ||
-      lowerContent.includes('in docs') ||
-      lowerContent.includes('my files')
-    ) {
-      mcpToolsToRun.add('search_documents');
-    }
-
-    // 3. Weather API Tool Detection
-    if (
-      lowerContent.includes('@weather') ||
-      lowerContent.includes('@weather_api') ||
-      lowerContent.includes('weather in') ||
-      lowerContent.includes('forecast in') ||
-      lowerContent.includes('temperature in')
-    ) {
+    if (lowerContent.includes('@weather_api')) {
       mcpToolsToRun.add('weather_api');
-    }
-
-    // 4. GitHub API Tool Detection
-    if (
-      lowerContent.includes('@github') ||
-      lowerContent.includes('@github_api') ||
-      lowerContent.includes('github repo') ||
-      lowerContent.includes('github api') ||
-      lowerContent.includes('repo stats')
-    ) {
-      mcpToolsToRun.add('github_api');
-    }
-
-    // 5. Database Metrics Tool Detection
-    if (
-      lowerContent.includes('@db_query') ||
-      lowerContent.includes('@db') ||
-      lowerContent.includes('@stats') ||
-      lowerContent.includes('database stats') ||
-      lowerContent.includes('workspace metrics') ||
-      lowerContent.includes('how many documents')
-    ) {
-      mcpToolsToRun.add('db_query');
-    }
-
-    // Also include any tools attached to the Agent
-    for (const at of agentTools) {
-      mcpToolsToRun.add(at.tool.name);
     }
 
 
     const TOOL_ACTION_MESSAGES: Record<string, string> = {
       web_search: `Searching the web for "${cleanedQuery}"...`,
       weather_api: `Fetching live weather data for "${cleanedQuery}"...`,
-      github_api: `Querying GitHub API for "${cleanedQuery}"...`,
-      db_query: `Retrieving database metrics & workspace analytics...`,
-      search_documents: `Searching document vector database for "${cleanedQuery}"...`,
     };
 
     const TOOL_DONE_MESSAGES: Record<string, string> = {
       web_search: `Searched online web sources`,
       weather_api: `Retrieved live weather forecast`,
-      github_api: `Fetched GitHub repository data`,
-      db_query: `Retrieved workspace database stats`,
-      search_documents: `Retrieved knowledge base chunks`,
     };
 
     for (const toolName of mcpToolsToRun) {
@@ -249,18 +186,25 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       toolContextString = `\n\n--- CRITICAL: LIVE REAL-TIME TOOL EXECUTION DATA ---\n${executedToolResults.join('\n\n')}\n--- MANDATORY INSTRUCTION FOR ASSISTANT ---\nYou MUST base your answer directly on the LIVE REAL-TIME TOOL EXECUTION DATA provided above. Do NOT say you do not have real-time information or mention your training knowledge cutoff. Treat the live tool data above as authoritative real-time facts.`;
     }
 
-    // Prepare previous conversation history for multi-turn LLM context
-    const previousMessages = conversation.messages.map((m) => ({
+    // 4. Sliding Context Window (Fast & Efficient like ChatGPT: last 14 messages max)
+    const SLIDING_WINDOW_SIZE = 14;
+    const historyMessages = conversation.messages.slice(-SLIDING_WINDOW_SIZE);
+    const previousMessages = historyMessages.map((m) => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
       content: m.content,
     }));
     previousMessages.push({ role: 'user', content: cleanedQuery });
 
-    // 4. Stream completion from Groq API
     const baseSystemPrompt = conversation.agent?.systemPrompt || 'You are an intelligent AI Assistant.';
     const finalSystemPrompt = `${baseSystemPrompt}${toolContextString}`;
 
-    const finalResponseText = await streamGroqCompletion({
+    sendEvent('start', {
+      conversationId: id,
+      ragMatchesCount: ragMatches.length,
+    });
+
+    // 5. Stream completion from Groq API (returns exact API usage metrics)
+    const streamOutput = await streamGroqCompletion({
       systemPrompt: finalSystemPrompt,
       ragContext: ragContextString,
       messages: previousMessages,
@@ -271,21 +215,34 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    const finalResponseText = streamOutput.text.trim();
+    const tokenUsage = streamOutput.usage;
 
-    // 5. Store final assistant message with citations
+    const MAX_CONTEXT_TOKENS = 128000;
+    const contextStats = {
+      usedTokens: tokenUsage.totalTokens,
+      maxTokens: MAX_CONTEXT_TOKENS,
+      remainingTokens: MAX_CONTEXT_TOKENS - tokenUsage.totalTokens,
+      percentage: Number(((tokenUsage.totalTokens / MAX_CONTEXT_TOKENS) * 100).toFixed(2)),
+    };
+
+    // 6. Store final assistant message with citations & token usage metadata
     const assistantMsg = await addMessage(
       id,
       workspaceId,
       req.user.id,
       'assistant',
-      finalResponseText.trim(),
+      finalResponseText,
       citations.length > 0 ? citations : undefined,
+      { tokenUsage },
     );
 
     sendEvent('done', {
       messageId: assistantMsg.id,
-      content: finalResponseText.trim(),
+      content: finalResponseText,
       citations,
+      tokenUsage,
+      contextStats,
     });
     res.end();
   } catch (error: unknown) {

@@ -21,6 +21,7 @@ import {
   Check,
   RotateCcw,
   ArrowUpRight,
+  Cpu,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -45,8 +46,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useQueryClient } from '@tanstack/react-query';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+import { API_BASE_URL } from '@/lib/api';
 
 const QUICK_STARTERS = [
   {
@@ -76,11 +76,8 @@ const QUICK_STARTERS = [
 ];
 
 const ALL_TOOLS = [
+  { tag: '@web_search', name: 'Web Search', description: 'Live Search Engine', icon: '🌐' },
   { tag: '@weather_api', name: 'Weather API', description: 'Real-time Live Weather & Forecast', icon: '☀️' },
-  { tag: '@web_search', name: 'Web Search', description: 'Live DuckDuckGo Search Engine', icon: '🌐' },
-  { tag: '@github_api', name: 'GitHub API', description: 'Real-time GitHub Repository Info', icon: '🐙' },
-  { tag: '@db_query', name: 'Database Query', description: 'Live Workspace Database Metrics', icon: '📊' },
-  { tag: '@search_documents', name: 'Document RAG Search', description: 'pgvector Semantic Document Search', icon: '📄' },
 ];
 
 
@@ -88,11 +85,12 @@ function MessageBubble({
   message,
   agentName,
 }: {
-  message: Message | { id: string; role: string; content: string; createdAt?: string };
+  message: Message | { id: string; role: string; content: string; createdAt?: string; tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number } };
   agentName?: string;
 }) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const tokenUsage = (message as any).tokenUsage || ((message as any).toolCalls as any)?.tokenUsage;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -174,6 +172,17 @@ function MessageBubble({
               </ReactMarkdown>
             </div>
           )}
+
+          {!isUser && tokenUsage && (
+            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50 text-[10px] font-medium text-muted-foreground">
+              <span className="text-primary font-semibold">{tokenUsage.promptTokens} in</span>
+              <span>•</span>
+              <span className="text-foreground/80">{tokenUsage.completionTokens} out</span>
+              <span>•</span>
+              <span className="font-semibold text-foreground">{tokenUsage.totalTokens} tokens</span>
+            </div>
+          )}
+
           {!isUser && (
             <button
               onClick={handleCopy}
@@ -225,11 +234,8 @@ export default function ChatPage() {
     if (agentTools && agentTools.length > 0) {
       const assignedNames = new Set(agentTools.map((at) => at.tool.name));
       return ALL_TOOLS.filter((tool) => {
-        if (tool.tag === '@search_documents' && (assignedNames.has('search_docs') || assignedNames.has('search_documents'))) return true;
         if (tool.tag === '@weather_api' && assignedNames.has('weather_api')) return true;
         if (tool.tag === '@web_search' && assignedNames.has('web_search')) return true;
-        if (tool.tag === '@github_api' && assignedNames.has('github_api')) return true;
-        if (tool.tag === '@db_query' && assignedNames.has('db_query')) return true;
         return false;
       });
     }
@@ -274,14 +280,28 @@ export default function ChatPage() {
   };
 
 
-  // Sync messages from server when convo changes
+  // Sync messages & context stats from server when convo loads or reloads
   useEffect(() => {
     if (activeConvo?.messages) {
       setLocalMessages(activeConvo.messages);
+      const lastAssistantMsg = [...activeConvo.messages]
+        .reverse()
+        .find((m: any) => m.role === 'assistant' && (m.tokenUsage || m.toolCalls?.tokenUsage));
+      const usage = (lastAssistantMsg as any)?.tokenUsage || (lastAssistantMsg as any)?.toolCalls?.tokenUsage;
+      if (usage?.totalTokens) {
+        const MAX_CONTEXT_TOKENS = 128000;
+        setContextStats({
+          usedTokens: usage.totalTokens,
+          maxTokens: MAX_CONTEXT_TOKENS,
+          remainingTokens: MAX_CONTEXT_TOKENS - usage.totalTokens,
+          percentage: Number(((usage.totalTokens / MAX_CONTEXT_TOKENS) * 100).toFixed(2)),
+        });
+      }
     } else {
       setLocalMessages([]);
+      setContextStats(null);
     }
-  }, [activeConvo?.id]);
+  }, [activeConvo?.id, activeConvo?.messages]);
 
   // Auto-scroll on new message
   useEffect(() => {
@@ -321,6 +341,7 @@ export default function ChatPage() {
   };
 
   const [activeToolStatus, setActiveToolStatus] = useState<{ toolName: string; message: string; isComplete: boolean } | null>(null);
+  const [contextStats, setContextStats] = useState<{ usedTokens: number; maxTokens: number; remainingTokens: number; percentage: number } | null>(null);
 
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || isSending || !activeConvoId || !workspaceId) return;
@@ -356,38 +377,52 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let accumulated = '';
       let currentEventType = '';
+      let sseBuffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || '';
 
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!.trim();
+          if (!line) continue;
+
           if (line.startsWith('event:')) {
             currentEventType = line.slice(6).trim();
             continue;
           }
+
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
 
-              if (currentEventType === 'tool_start') {
+              if (currentEventType === 'start' && data.contextStats) {
+                setContextStats(data.contextStats);
+              } else if (currentEventType === 'tool_start') {
                 setActiveToolStatus({ toolName: data.toolName, message: data.message, isComplete: false });
               } else if (currentEventType === 'tool_done') {
                 setActiveToolStatus({ toolName: data.toolName, message: data.message, isComplete: true });
-              } else if (currentEventType === 'chunk' || data.content) {
+              } else if (currentEventType === 'chunk') {
                 if (data.content) {
                   accumulated += data.content;
                   setStreamingContent(accumulated);
                 }
               }
 
-              if (data.messageId) {
+              if (currentEventType === 'done' || data.messageId) {
+                if (data.contextStats) setContextStats(data.contextStats);
                 setLocalMessages((msgs) => [
                   ...msgs,
-                  { id: data.messageId, role: 'assistant', content: data.content || accumulated },
+                  {
+                    id: data.messageId || `msg-${Date.now()}`,
+                    role: 'assistant',
+                    content: data.content || accumulated,
+                    tokenUsage: data.tokenUsage,
+                  },
                 ]);
                 setStreamingContent(null);
                 setActiveToolStatus(null);
@@ -676,7 +711,28 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                {contextStats && (
+                  <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-muted/40 border border-border/80 text-xs">
+                    <Cpu className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center justify-between gap-3 text-[10px] font-semibold">
+                        <span className="text-foreground">Context Window</span>
+                        <span className="text-primary">{contextStats.percentage}%</span>
+                      </div>
+                      <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden border border-border/40">
+                        <div
+                          className="h-full bg-primary transition-all duration-300 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(3, contextStats.percentage))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {contextStats.usedTokens.toLocaleString()} / {contextStats.maxTokens.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
                 <Button
                   variant="ghost"
                   size="sm"

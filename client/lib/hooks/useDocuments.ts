@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, API_BASE_URL } from '@/lib/api';
 
 export interface Document {
   id: string;
@@ -15,17 +16,35 @@ export interface Document {
 }
 
 export function useDocuments(workspaceId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  // Real-time instant status updates via Server-Sent Events (SSE Stream) - Zero Polling
+  useEffect(() => {
+    if (!workspaceId) return;
+
+    const eventSource = new EventSource(`${API_BASE_URL}/workspaces/${workspaceId}/documents/events`, {
+      withCredentials: true,
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.status) {
+          queryClient.invalidateQueries({ queryKey: ['documents', workspaceId] });
+        }
+      } catch {}
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [workspaceId, queryClient]);
+
   return useQuery({
     queryKey: ['documents', workspaceId],
     queryFn: () => api.get<Document[]>(`/workspaces/${workspaceId}/documents`),
     enabled: !!workspaceId,
     select: (res) => res.data ?? [],
-    refetchInterval: (query) => {
-      const raw = query.state.data as { data?: Document[] } | undefined;
-      const docs = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
-      const isProcessing = docs.some((d) => d.status === 'pending' || d.status === 'processing');
-      return isProcessing ? 2000 : false;
-    },
   });
 }
 
@@ -49,7 +68,6 @@ export async function uploadDocument(
   formData.append('file', file);
   if (name) formData.append('name', name);
 
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
   const res = await fetch(`${API_BASE_URL}/workspaces/${workspaceId}/documents`, {
     method: 'POST',
     body: formData,

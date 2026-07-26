@@ -3,9 +3,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { search as duckSearch, SafeSearchType } from 'duck-duck-scrape';
-import { searchRelevantChunks } from './ragService.js';
-import prisma from '../lib/prisma.js';
 
 export interface McpToolResult {
   content: Array<{ type: 'text'; text: string }>;
@@ -33,45 +30,14 @@ function getWeatherCondition(code: number): string {
  */
 export const MCP_TOOLS_DEFINITIONS = [
   {
-    name: 'search_documents',
-    description: 'Search through workspace knowledge base documents using semantic pgvector search.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'The search query to find relevant document chunks.' },
-        topK: { type: 'number', description: 'Maximum number of results to return (default: 5)', default: 5 },
-      },
-      required: ['query'],
-    },
-  },
-  {
     name: 'web_search',
-    description: 'Search the live web for real-time information, news, and current events.',
+    description: 'Search the live web for real-time information, news, current affairs, and events.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query to look up on the internet.' },
       },
       required: ['query'],
-    },
-  },
-  {
-    name: 'db_query',
-    description: 'Query live workspace metrics, document count, vector chunk stats, agents, and message counts.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'github_api',
-    description: 'Fetch real live GitHub repository info, stars, open issues, and pull requests.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        endpoint: { type: 'string', description: 'GitHub API endpoint path or repository name, e.g. repos/facebook/react or repos/vercel/next.js' },
-      },
-      required: ['endpoint'],
     },
   },
   {
@@ -130,114 +96,138 @@ export class ForgeAIMcpServer {
   public async executeMcpToolHandler(
     toolName: string,
     args: Record<string, unknown>,
-    workspaceId: string
+    _workspaceId: string
   ): Promise<McpToolResult> {
     try {
       switch (toolName) {
-        case 'search_documents': {
-          const query = (args['query'] || args['q'] || '') as string;
-          if (!query || !query.trim()) {
-            return {
-              isError: true,
-              content: [{ type: 'text', text: 'Error: Query parameter is required for search_documents tool.' }],
-            };
-          }
-          const topK = typeof args['topK'] === 'number' ? args['topK'] : 5;
-          const matches = await searchRelevantChunks(workspaceId, query, undefined, topK);
-          const payload = {
-            retrievedContext: matches.map((m) => m.content).join('\n---\n'),
-            citations: matches.map((m) => ({ documentName: m.documentName, score: m.score })),
-            chunkCount: matches.length,
-          };
-          return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-        }
-
-        case 'db_query': {
-          const workspace = await prisma.workspace.findUnique({
-            where: { id: workspaceId },
-            select: { id: true, name: true, slug: true, createdAt: true },
-          });
-
-          const docCount = await prisma.document.count({ where: { workspaceId } });
-          const chunkCount = await prisma.documentChunk.count({
-            where: { document: { workspaceId } },
-          });
-          const agentCount = await prisma.agent.count({ where: { workspaceId } });
-          const conversationCount = await prisma.conversation.count({ where: { workspaceId } });
-          const messageCount = await prisma.message.count({
-            where: { conversation: { workspaceId } },
-          });
-
-          const payload = {
-            workspace,
-            databaseMetrics: {
-              documents: docCount,
-              totalVectorChunks: chunkCount,
-              configuredAgents: agentCount,
-              activeConversations: conversationCount,
-              totalMessagesLogged: messageCount,
-            },
-          };
-          return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-        }
-
         case 'web_search': {
           let rawQuery = (args['query'] || args['q'] || '') as string;
-          const cleanQuery = rawQuery.replace(/@\w+/g, '').trim();
+          const cleanQuery = rawQuery
+            .replace(/^@\w+\s*/, '')
+            .replace(/^(?:search online for|search web for|search for|google|find)\s*/i, '')
+            .trim() || rawQuery;
 
           if (!cleanQuery) {
             return { isError: true, content: [{ type: 'text', text: 'Error: Search query is required.' }] };
           }
 
+          const results: Array<{ title: string; snippet: string; link: string }> = [];
+
+          // 1. Live DuckDuckGo Web Search
           try {
-            const searchResults = await duckSearch(cleanQuery, {
-              safeSearch: SafeSearchType.STRICT,
-            });
-
-            const results = (searchResults.results || []).slice(0, 5).map((r: any) => ({
-              title: r.title,
-              snippet: r.snippet || r.description || r.title || '',
-              link: r.url,
-            }));
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(
-                    {
-                      query: cleanQuery,
-                      searchResultsCount: results.length,
-                      searchResults: results,
-                    },
-                    null,
-                    2
-                  ),
+            const ddgRes = await globalThis.fetch(
+              `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`,
+              {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.5',
                 },
-              ],
-            };
-          } catch (err: any) {
+              }
+            );
+
+            if (ddgRes.ok) {
+              const html = await ddgRes.text();
+              const matches = html.matchAll(
+                /<a[^>]+class="result__snippet"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+              );
+
+              for (const m of matches) {
+                let link = m[1] || '';
+                if (link.includes('uddg=')) {
+                  const u = link.match(/uddg=([^&]+)/);
+                  if (u && u[1]) link = decodeURIComponent(u[1]);
+                }
+                const snippet = m[2]?.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").trim() || '';
+
+                let title = link.split('/')[2]?.replace('www.', '') || 'Web Source';
+                if (link.includes('wikipedia.org')) {
+                  const page = link.split('/').pop()?.replace(/_/g, ' ');
+                  if (page) title = decodeURIComponent(page);
+                } else if (link.includes('.gov')) {
+                  title = 'Official Government Portal';
+                }
+
+                if (snippet && link && !results.some((r) => r.link === link)) {
+                  results.push({ title, snippet, link });
+                }
+              }
+            }
+          } catch {
+            // Ignore DDG network errors
+          }
+
+          // 2. Wikipedia Search API if DDG returned empty
+          if (results.length === 0) {
+            try {
+              const wikiRes = await globalThis.fetch(
+                `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&format=json&origin=*`
+              );
+              if (wikiRes.ok) {
+                const wikiData = (await wikiRes.json()) as {
+                  query?: { search?: Array<{ title: string; snippet: string }> };
+                };
+                const items = wikiData.query?.search || [];
+                for (const item of items.slice(0, 5)) {
+                  const title = item.title;
+                  const snippet = item.snippet.replace(/<[^>]+>/g, '').trim();
+                  const link = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+                  results.push({ title, snippet, link });
+                }
+              }
+            } catch {
+              // Ignore
+            }
+          }
+
+          if (results.length === 0) {
             return {
               isError: true,
-              content: [{ type: 'text', text: `Web Search Error: ${err.message}` }],
+              content: [{ type: 'text', text: `No live search results found for query: "${cleanQuery}".` }],
             };
           }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    query: cleanQuery,
+                    searchResultsCount: results.length,
+                    searchResults: results.slice(0, 6),
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
         }
 
-        
         case 'weather_api': {
-          const location = (args['location'] || args['city'] || 'San Francisco') as string;
+          const rawLocation = (args['location'] || args['city'] || args['query'] || 'San Francisco') as string;
+          const location = rawLocation
+            .replace(/^what(?:'s|\s+is)?\s+the\s+weather\s+(?:in|for|at)?\s*/i, '')
+            .replace(/^(?:weather|forecast|temperature|how is the weather)\s+(?:in|for|at)?\s*/i, '')
+            .replace(/\s+(?:today|now|right now|currently|this week)\??$/i, '')
+            .replace(/[?.,!]/g, '')
+            .trim() || rawLocation;
+
           const geoRes = await globalThis.fetch(
             `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`
           );
 
-          if (!geoRes.ok) throw new Error(`Geocoding API status ${geoRes.status}`);
+          if (!geoRes.ok) {
+            throw new Error(`Geocoding API failed with status ${geoRes.status}`);
+          }
+
           const geoData = (await geoRes.json()) as {
             results?: Array<{ name: string; country: string; latitude: number; longitude: number }>;
           };
 
           if (!geoData.results || geoData.results.length === 0) {
-            return { isError: true, content: [{ type: 'text', text: `Error: Location "${location}" not found.` }] };
+            return { isError: true, content: [{ type: 'text', text: `Error: Could not find location "${location}".` }] };
           }
 
           const loc = geoData.results[0]!;
@@ -245,13 +235,18 @@ export class ForgeAIMcpServer {
             `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current_weather=true`
           );
 
-          if (!weatherRes.ok) throw new Error(`Weather API status ${weatherRes.status}`);
+          if (!weatherRes.ok) {
+            throw new Error(`Weather API failed with status ${weatherRes.status}`);
+          }
+
           const weatherData = (await weatherRes.json()) as {
             current_weather?: { temperature: number; windspeed: number; weathercode: number };
           };
 
           const current = weatherData.current_weather;
-          if (!current) throw new Error('No weather data available');
+          if (!current) {
+            throw new Error('No weather data returned from Weather API.');
+          }
 
           const tempC = current.temperature;
           const tempF = Math.round((tempC * 9) / 5 + 32);
@@ -265,42 +260,20 @@ export class ForgeAIMcpServer {
             condition,
             windSpeedKmh: `${current.windspeed} km/h`,
           };
+
           return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-        }
-
-        case 'github_api': {
-          let endpoint = (args['endpoint'] || args['repo'] || args['query'] || 'repos/facebook/react') as string;
-          endpoint = endpoint.replace(/^\/+/, '');
-          if (!endpoint.startsWith('repos/') && !endpoint.startsWith('search/') && endpoint.includes('/')) {
-            endpoint = `repos/${endpoint}`;
-          }
-
-          const response = await globalThis.fetch(`https://api.github.com/${endpoint}`, {
-            headers: {
-              'User-Agent': 'ForgeAI-MCP-Server/1.0',
-              Accept: 'application/vnd.github.v3+json',
-            },
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`GitHub API status ${response.status}: ${errText}`);
-          }
-
-          const data = await response.json();
-          return { content: [{ type: 'text', text: JSON.stringify({ endpoint: `https://api.github.com/${endpoint}`, data }, null, 2) }] };
         }
 
         default:
           return {
             isError: true,
-            content: [{ type: 'text', text: `Error: MCP tool "${toolName}" is not registered.` }],
+            content: [{ type: 'text', text: `Error: Tool "${toolName}" is not registered.` }],
           };
       }
     } catch (err: any) {
       return {
         isError: true,
-        content: [{ type: 'text', text: `MCP Execution Error: ${err.message}` }],
+        content: [{ type: 'text', text: `Tool Execution Failed: ${err.message}` }],
       };
     }
   }

@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import path from 'path';
 import prisma from '../lib/prisma.js';
 
@@ -8,6 +9,8 @@ import {
   deleteFileFromStorage,
   getPresignedUrlFromStorage,
 } from '../lib/storage.js';
+
+export const documentEventEmitter = new EventEmitter();
 
 const ALLOWED_FILE_TYPES = ['pdf', 'docx', 'md', 'csv', 'txt'] as const;
 type FileType = (typeof ALLOWED_FILE_TYPES)[number];
@@ -149,6 +152,12 @@ export async function processDocumentAsync(documentId: string) {
     const doc = await prisma.document.findUnique({ where: { id: documentId } });
     if (!doc) return;
 
+    documentEventEmitter.emit('document_update', {
+      workspaceId: doc.workspaceId,
+      documentId,
+      status: 'processing',
+    });
+
     let rawText = '';
 
     try {
@@ -165,6 +174,12 @@ export async function processDocumentAsync(documentId: string) {
       await prisma.document.update({
         where: { id: documentId },
         data: { status: 'completed' },
+      });
+      documentEventEmitter.emit('document_update', {
+        workspaceId: doc.workspaceId,
+        documentId,
+        status: 'completed',
+        chunksCount: 0,
       });
       return;
     }
@@ -194,15 +209,28 @@ export async function processDocumentAsync(documentId: string) {
       where: { id: documentId },
       data: { status: 'completed' },
     });
+
+    documentEventEmitter.emit('document_update', {
+      workspaceId: doc.workspaceId,
+      documentId,
+      status: 'completed',
+      chunksCount: chunks.length,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to process document text and embeddings';
     console.error(`[DocumentService] Document processing failed for ${documentId}:`, err);
-    await prisma.document.update({
+    const updatedDoc = await prisma.document.update({
       where: { id: documentId },
       data: {
         status: 'error',
         errorMessage: message,
       },
+    });
+    documentEventEmitter.emit('document_update', {
+      workspaceId: updatedDoc.workspaceId,
+      documentId,
+      status: 'error',
+      errorMessage: message,
     });
   }
 }

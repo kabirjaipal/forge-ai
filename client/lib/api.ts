@@ -1,4 +1,8 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
+if (!process.env.NEXT_PUBLIC_API_URL) {
+  throw new Error('Configuration Error: NEXT_PUBLIC_API_URL environment variable is missing.');
+}
+
+export const API_BASE_URL: string = process.env.NEXT_PUBLIC_API_URL;
 
 export interface ApiResponse<T = any> {
   success: boolean;
