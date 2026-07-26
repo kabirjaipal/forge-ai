@@ -49,15 +49,6 @@ sudo docker compose up --build
 
 ---
 
-## 💼 Resume Highlights (Copy & Paste)
-
-* **Full-Stack AI Engine**: Built a multi-tenant RAG platform using **Next.js 16**, **Express 5 (TypeScript)**, and **PostgreSQL `pgvector`** for document-grounded AI chat with citations.
-* **Async Job Queue**: Engineered asynchronous document chunking and vector embedding pipelines offloaded to **BullMQ 5** & **Redis** background workers.
-* **Custom Tool Execution**: Implemented dynamic JSON Schema API tool calling and integrated **Model Context Protocol (MCP)** server interfaces.
-* **Cloud Architecture & DevOps**: Integrated AWS S3/MinIO presigned file uploads, OAuth multi-tenancy, and containerized deployment via **Docker Compose**.
-
----
-
 <div align="center">
 Made by <b>Kabir Jaipal</b>
 </div>
