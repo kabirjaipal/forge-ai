@@ -9,6 +9,7 @@ import {
   deleteFileFromStorage,
   getPresignedUrlFromStorage,
 } from '../lib/storage.js';
+import { addDocumentJob } from '../lib/queue.js';
 
 export const documentEventEmitter = new EventEmitter();
 
@@ -130,9 +131,12 @@ export async function createDocument(input: UploadDocumentInput) {
     },
   });
 
-  // Trigger async background processing for text extraction & vector embedding generation
-  processDocumentAsync(document.id).catch((err) => {
-    console.error(`[DocumentService] Error processing document ${document.id}:`, err);
+  // Trigger async background processing via queue worker for text extraction & vector embedding generation
+  addDocumentJob(document.id, workspaceId).catch(() => {
+    // Fallback to direct async execution if queue fails
+    processDocumentAsync(document.id).catch((err) => {
+      console.error(`[DocumentService] Error processing document ${document.id}:`, err);
+    });
   });
 
   return document;

@@ -13,6 +13,7 @@ import { auth } from './lib/betterAuth.js';
 import routes from './routes/index.js';
 import { seedTools } from './lib/seedTools.js';
 import { initQueues } from './lib/queue.js';
+import { initDocumentWorker } from './workers/documentWorker.js';
 
 declare global {
   namespace Express {
@@ -98,6 +99,7 @@ async function startServer() {
       // Seed default tools in background (non-blocking)
       seedTools().catch((err) => logger.error({ err }, 'Tool seeding failed'));
       initQueues();
+      initDocumentWorker();
     });
 
     server.keepAliveTimeout = 65_000;
