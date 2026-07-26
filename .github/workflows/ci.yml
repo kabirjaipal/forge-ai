@@ -54,6 +54,8 @@ jobs:
           npm ci
 
       - name: Build Next.js App
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
         run: |
           cd client
           npm run build
