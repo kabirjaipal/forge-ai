@@ -17,6 +17,24 @@ export const auth = betterAuth({
   secret: config.JWT_SECRET,
   baseURL: `http://${config.HOST === '0.0.0.0' ? 'localhost' : config.HOST}:${config.PORT}`,
   trustedOrigins: origins.length > 0 ? origins : ['http://localhost:3000'],
+  socialProviders: {
+    ...(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET
+      ? {
+          google: {
+            clientId: config.GOOGLE_CLIENT_ID,
+            clientSecret: config.GOOGLE_CLIENT_SECRET,
+          },
+        }
+      : {}),
+    ...(config.GITHUB_CLIENT_ID && config.GITHUB_CLIENT_SECRET
+      ? {
+          github: {
+            clientId: config.GITHUB_CLIENT_ID,
+            clientSecret: config.GITHUB_CLIENT_SECRET,
+          },
+        }
+      : {}),
+  },
   advanced: {
     defaultCookieAttributes: {
       sameSite: 'lax',

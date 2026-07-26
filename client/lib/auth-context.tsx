@@ -25,6 +25,7 @@ interface AuthContextType {
   workspaces: Workspace[];
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithProvider: (provider: 'google' | 'github') => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   setCurrentWorkspace: (workspace: Workspace) => void;
@@ -87,6 +88,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithProvider = async (provider: 'google' | 'github') => {
+    const callbackURL = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : 'http://localhost:3000/dashboard';
+    await signIn.social({
+      provider,
+      callbackURL,
+    });
+  };
+
   const register = async (email: string, password: string, name?: string) => {
     try {
       // Server auto-creates the workspace via databaseHooks.user.create.after
@@ -116,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         workspaces,
         isLoading: isPending || isLoadingWorkspaces,
         login,
+        loginWithProvider,
         register,
         logout,
         setCurrentWorkspace,

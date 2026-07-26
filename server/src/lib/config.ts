@@ -26,6 +26,10 @@ const configSchema = z.object({
   MINIO_SECRET_KEY: z.string().default('minioadmin'),
   MINIO_BUCKET: z.string().default('forgeai-documents'),
   MINIO_USE_SSL: z.coerce.boolean().default(false),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
 });
 
 

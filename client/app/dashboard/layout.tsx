@@ -125,22 +125,14 @@ export default function DashboardLayout({
       <aside className="w-64 bg-background border border-border rounded-2xl flex flex-col justify-between shrink-0 shadow-sm overflow-hidden select-none">
         <div className="flex flex-col gap-1">
           {/* Brand Header */}
-          <div className="p-4 border-b border-border/80 flex items-center justify-between">
+          <div className="p-4 border-b border-border/80 flex items-center">
             <Link href="/" className="flex items-center gap-3 group">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-primary to-primary/80 text-primary-foreground flex items-center justify-center shadow-md shadow-primary/20 transition-transform duration-200 group-hover:scale-105">
+              <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105">
                 <Zap className="w-5 h-5 fill-current" />
               </div>
-              <div className="flex flex-col">
-                <span className="text-base font-bold tracking-tight font-heading text-foreground leading-none flex items-center gap-1.5">
-                  Forge<span className="text-primary">AI</span>
-                  <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-semibold tracking-normal">
-                    v1.0
-                  </span>
-                </span>
-                <span className="text-[10px] text-muted-foreground font-medium mt-0.5">
-                  Agentic RAG Platform
-                </span>
-              </div>
+              <span className="text-xl font-bold tracking-tight font-heading text-foreground">
+                Forge<span className="text-primary">AI</span>
+              </span>
             </Link>
           </div>
 
