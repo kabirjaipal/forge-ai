@@ -16,7 +16,13 @@ export interface Conversation {
   title: string;
   workspaceId: string;
   agentId?: string | null;
-  agent?: { id: string; name: string; avatar?: string | null } | null;
+  agent?: {
+    id: string;
+    name: string;
+    avatar?: string | null;
+    agentTools?: Array<{ tool: { name: string; description: string } }>;
+  } | null;
+
   createdAt: string;
   updatedAt: string;
   _count?: { messages: number };

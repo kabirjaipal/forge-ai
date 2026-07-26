@@ -75,6 +75,15 @@ const QUICK_STARTERS = [
   },
 ];
 
+const ALL_TOOLS = [
+  { tag: '@weather_api', name: 'Weather API', description: 'Real-time Live Weather & Forecast', icon: '☀️' },
+  { tag: '@web_search', name: 'Web Search', description: 'Live DuckDuckGo Search Engine', icon: '🌐' },
+  { tag: '@github_api', name: 'GitHub API', description: 'Real-time GitHub Repository Info', icon: '🐙' },
+  { tag: '@db_query', name: 'Database Query', description: 'Live Workspace Database Metrics', icon: '📊' },
+  { tag: '@search_documents', name: 'Document RAG Search', description: 'pgvector Semantic Document Search', icon: '📄' },
+];
+
+
 function MessageBubble({
   message,
   agentName,
@@ -205,7 +214,65 @@ export default function ChatPage() {
   const [filterType, setFilterType] = useState<'all' | 'agents'>('all');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [showToolSuggestions, setShowToolSuggestions] = useState(false);
+  const [toolSearchQuery, setToolSearchQuery] = useState('');
+
   const { data: activeConvo } = useConversation(workspaceId, activeConvoId || undefined);
+
+  // Compute available tools: if agent is selected with specific tools, show those; if no agent, show ALL tools
+  const availableTools = useMemo(() => {
+    const agentTools = activeConvo?.agent?.agentTools;
+    if (agentTools && agentTools.length > 0) {
+      const assignedNames = new Set(agentTools.map((at) => at.tool.name));
+      return ALL_TOOLS.filter((tool) => {
+        if (tool.tag === '@search_documents' && (assignedNames.has('search_docs') || assignedNames.has('search_documents'))) return true;
+        if (tool.tag === '@weather_api' && assignedNames.has('weather_api')) return true;
+        if (tool.tag === '@web_search' && assignedNames.has('web_search')) return true;
+        if (tool.tag === '@github_api' && assignedNames.has('github_api')) return true;
+        if (tool.tag === '@db_query' && assignedNames.has('db_query')) return true;
+        return false;
+      });
+    }
+    return ALL_TOOLS;
+  }, [activeConvo?.agent?.agentTools]);
+
+  const filteredToolSuggestions = useMemo(() => {
+    if (!toolSearchQuery) return availableTools;
+    return availableTools.filter(
+      (t) =>
+        t.tag.toLowerCase().includes(toolSearchQuery) ||
+        t.name.toLowerCase().includes(toolSearchQuery) ||
+        t.description.toLowerCase().includes(toolSearchQuery)
+    );
+  }, [availableTools, toolSearchQuery]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    const lastAt = val.lastIndexOf('@');
+    if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ' || val[lastAt - 1] === '\n')) {
+      const query = val.slice(lastAt + 1);
+      if (!query.includes(' ') && !query.includes('\n')) {
+        setToolSearchQuery(query.toLowerCase());
+        setShowToolSuggestions(true);
+        return;
+      }
+    }
+    setShowToolSuggestions(false);
+  };
+
+  const insertToolTag = (tag: string) => {
+    const lastAt = inputText.lastIndexOf('@');
+    if (lastAt !== -1) {
+      const before = inputText.slice(0, lastAt);
+      setInputText(`${before}${tag} `);
+    } else {
+      setInputText(`${inputText} ${tag} `);
+    }
+    setShowToolSuggestions(false);
+  };
+
 
   // Sync messages from server when convo changes
   useEffect(() => {
@@ -253,6 +320,8 @@ export default function ChatPage() {
     setInputText(starter.prompt);
   };
 
+  const [activeToolStatus, setActiveToolStatus] = useState<{ toolName: string; message: string; isComplete: boolean } | null>(null);
+
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || isSending || !activeConvoId || !workspaceId) return;
 
@@ -261,6 +330,7 @@ export default function ChatPage() {
     setInputText('');
     setIsSending(true);
     setStreamingContent('');
+    setActiveToolStatus(null);
     setError(null);
 
     try {
@@ -278,36 +348,49 @@ export default function ChatPage() {
         setError('Failed to get a response from the AI. Please try again.');
         setIsSending(false);
         setStreamingContent(null);
+        setActiveToolStatus(null);
         return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = '';
+      let currentEventType = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n');
-        for (const line of lines) {
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]!.trim();
+          if (line.startsWith('event:')) {
+            currentEventType = line.slice(6).trim();
+            continue;
+          }
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
-              if (data.message) {
-                setError(`AI Error: ${data.message}`);
-                setStreamingContent(null);
+
+              if (currentEventType === 'tool_start') {
+                setActiveToolStatus({ toolName: data.toolName, message: data.message, isComplete: false });
+              } else if (currentEventType === 'tool_done') {
+                setActiveToolStatus({ toolName: data.toolName, message: data.message, isComplete: true });
+              } else if (currentEventType === 'chunk' || data.content) {
+                if (data.content) {
+                  accumulated += data.content;
+                  setStreamingContent(accumulated);
+                }
               }
-              if (data.content) {
-                accumulated += data.content;
-                setStreamingContent(accumulated);
-              }
+
               if (data.messageId) {
                 setLocalMessages((msgs) => [
                   ...msgs,
                   { id: data.messageId, role: 'assistant', content: data.content || accumulated },
                 ]);
                 setStreamingContent(null);
+                setActiveToolStatus(null);
                 queryClient.invalidateQueries({ queryKey: ['conversation', workspaceId, activeConvoId] });
                 queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
               }
@@ -315,13 +398,16 @@ export default function ChatPage() {
           }
         }
       }
+
     } catch (err: any) {
       setError(err.message || 'An error occurred');
       setStreamingContent(null);
+      setActiveToolStatus(null);
     } finally {
       setIsSending(false);
     }
   }, [inputText, isSending, activeConvoId, workspaceId, queryClient]);
+
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -626,12 +712,24 @@ export default function ChatPage() {
                 />
               ))}
 
+              {activeToolStatus && (
+                <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs font-semibold w-fit shadow-xs">
+                  {activeToolStatus.isComplete ? (
+                    <Check className="w-4 h-4 text-success shrink-0" />
+                  ) : (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                  )}
+                  <span>{activeToolStatus.message}</span>
+                </div>
+              )}
+
               {streamingContent !== null && (
                 <MessageBubble
-                  message={{ id: 'streaming', role: 'assistant', content: streamingContent || '...' }}
+                  message={{ id: 'streaming', role: 'assistant', content: streamingContent || 'Thinking...' }}
                   agentName={activeConvo?.agent?.name}
                 />
               )}
+
 
               {error && (
                 <div className="flex items-center gap-3 p-3.5 rounded-xl bg-danger/10 border border-danger/20 text-danger text-xs font-medium">
@@ -644,16 +742,48 @@ export default function ChatPage() {
             </div>
 
             {/* Input Box */}
-            <div className="p-4 border-t border-border bg-background shrink-0">
+            <div className="p-4 border-t border-border bg-background shrink-0 relative">
+              {/* @ Tool Autocomplete Suggestion Popup */}
+              {showToolSuggestions && filteredToolSuggestions.length > 0 && (
+                <div className="absolute bottom-full left-4 right-4 mb-2 p-2 bg-background border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto space-y-1 z-30">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase px-2 py-1 flex items-center justify-between border-b border-border/50">
+                    <span>Mention MCP Tool (@)</span>
+                    <span className="text-primary font-mono font-semibold">
+                      {activeConvo?.agent ? `${activeConvo.agent.name} Tools (${filteredToolSuggestions.length})` : `All Tools (${filteredToolSuggestions.length})`}
+                    </span>
+                  </div>
+                  {filteredToolSuggestions.map((tool) => (
+                    <button
+                      key={tool.tag}
+                      type="button"
+                      onClick={() => insertToolTag(tool.tag)}
+                      className="w-full text-left p-2 rounded-lg hover:bg-primary/10 transition-colors flex items-center gap-2.5 group cursor-pointer"
+                    >
+                      <span className="text-base">{tool.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-xs text-primary">{tool.tag}</span>
+                          <span className="text-xs font-semibold text-foreground">{tool.name}</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground truncate">{tool.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="bg-muted/30 border border-border rounded-2xl p-3 focus-within:border-primary/40 transition-all shadow-xs space-y-2">
                 <Textarea
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
+                  onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
-                  placeholder={`Ask ${activeConvo?.agent?.name || 'AI Assistant'} anything... (Press Enter to send, Shift+Enter for line break)`}
+                  placeholder={`Ask ${activeConvo?.agent?.name || 'AI Assistant'}... Type @ to mention a tool (e.g. @weather_api, @web_search)`}
                   rows={2}
                   className="w-full bg-transparent border-0 p-0 text-sm text-foreground focus-visible:outline-none placeholder:text-muted-foreground/70 resize-none min-h-[48px]"
                 />
+
+
+
                 <div className="flex items-center justify-between pt-1 border-t border-border/40">
                   <div className="flex items-center gap-2">
                     {activeConvo?.agent ? (
@@ -662,7 +792,7 @@ export default function ChatPage() {
                       </span>
                     ) : (
                       <span className="text-[10px] font-semibold text-muted-foreground bg-background border border-border px-2 py-0.5 rounded-lg">
-                        ⚡ General Chat
+                        ⚡ General Chat (All Tools Enabled)
                       </span>
                     )}
                   </div>
@@ -691,3 +821,4 @@ export default function ChatPage() {
     </div>
   );
 }
+

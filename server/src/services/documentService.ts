@@ -1,6 +1,6 @@
 import path from 'path';
-import fs from 'fs/promises';
 import prisma from '../lib/prisma.js';
+
 import { AppError } from '../middleware/errorHandler.js';
 import { chunkText, generateEmbeddings } from './embeddingService.js';
 import {

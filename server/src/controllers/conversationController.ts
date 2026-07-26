@@ -116,39 +116,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
         .join('\n\n');
     }
 
-    // 3b. Execute attached Agent Tools if present
-    let toolContextString = '';
-    const agentTools = conversation.agent?.agentTools || [];
-    if (agentTools.length > 0) {
-      const executedToolResults: string[] = [];
-      const lowerContent = content.toLowerCase();
-      for (const at of agentTools) {
-        const toolName = at.tool.name;
-        if (
-          (toolName === 'weather_api' && (lowerContent.includes('weather') || lowerContent.includes('temp') || lowerContent.includes('forecast'))) ||
-          (toolName === 'web_search' && (lowerContent.includes('search') || lowerContent.includes('web') || lowerContent.includes('latest'))) ||
-          (toolName === 'db_query' && (lowerContent.includes('database') || lowerContent.includes('query') || lowerContent.includes('stats') || lowerContent.includes('count'))) ||
-          toolName === 'search_docs' || toolName === 'search_documents'
-        ) {
-          const result = await executeTool(toolName, { query: content, location: content }, workspaceId);
-          if (result.success && result.result) {
-            executedToolResults.push(`[Tool Execution: ${toolName}]\nResult: ${JSON.stringify(result.result, null, 2)}`);
-          }
-        }
-      }
-      if (executedToolResults.length > 0) {
-        toolContextString = `\n\n--- ACTIVE TOOL EXECUTION OUTPUTS ---\n${executedToolResults.join('\n\n')}\n--- END TOOL OUTPUTS ---`;
-      }
-    }
-
-    // Prepare previous conversation history for multi-turn LLM context
-    const previousMessages = conversation.messages.map((m) => ({
-      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
-      content: m.content,
-    }));
-    previousMessages.push({ role: 'user', content });
-
-    // Set up SSE headers for streaming response
+    // Set up SSE headers for real-time streaming response
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -162,8 +130,136 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
 
     sendEvent('start', { conversationId: id, ragMatchesCount: ragMatches.length });
 
+    // Clean query by removing @tool_name tags
+    const cleanedQuery = content.replace(/@\w+/g, '').trim() || content;
+
+    // 3b. Execute attached Agent Tools or explicit @tool_name user mentions in chat
+    let toolContextString = '';
+    const agentTools = conversation.agent?.agentTools || [];
+    const executedToolResults: string[] = [];
+    const lowerContent = content.toLowerCase();
+
+    // Natural language & @mention intent detection for MCP Tools
+    const mcpToolsToRun = new Set<string>();
+
+    // 1. Web Search Tool Detection
+    if (
+      lowerContent.includes('@web_search') ||
+      lowerContent.includes('@search_web') ||
+      lowerContent.includes('@google') ||
+      lowerContent.includes('search online') ||
+      lowerContent.includes('search web') ||
+      lowerContent.includes('online search') ||
+      lowerContent.includes('web search') ||
+      lowerContent.includes('latest news') ||
+      lowerContent.includes('current event')
+    ) {
+      mcpToolsToRun.add('web_search');
+    }
+
+    // 2. Document RAG Search Tool Detection
+    if (
+      lowerContent.includes('@search_docs') ||
+      lowerContent.includes('@search_documents') ||
+      lowerContent.includes('@docs') ||
+      lowerContent.includes('search docs') ||
+      lowerContent.includes('search documents') ||
+      lowerContent.includes('knowledge base') ||
+      lowerContent.includes('in docs') ||
+      lowerContent.includes('my files')
+    ) {
+      mcpToolsToRun.add('search_documents');
+    }
+
+    // 3. Weather API Tool Detection
+    if (
+      lowerContent.includes('@weather') ||
+      lowerContent.includes('@weather_api') ||
+      lowerContent.includes('weather in') ||
+      lowerContent.includes('forecast in') ||
+      lowerContent.includes('temperature in')
+    ) {
+      mcpToolsToRun.add('weather_api');
+    }
+
+    // 4. GitHub API Tool Detection
+    if (
+      lowerContent.includes('@github') ||
+      lowerContent.includes('@github_api') ||
+      lowerContent.includes('github repo') ||
+      lowerContent.includes('github api') ||
+      lowerContent.includes('repo stats')
+    ) {
+      mcpToolsToRun.add('github_api');
+    }
+
+    // 5. Database Metrics Tool Detection
+    if (
+      lowerContent.includes('@db_query') ||
+      lowerContent.includes('@db') ||
+      lowerContent.includes('@stats') ||
+      lowerContent.includes('database stats') ||
+      lowerContent.includes('workspace metrics') ||
+      lowerContent.includes('how many documents')
+    ) {
+      mcpToolsToRun.add('db_query');
+    }
+
+    // Also include any tools attached to the Agent
+    for (const at of agentTools) {
+      mcpToolsToRun.add(at.tool.name);
+    }
+
+
+    const TOOL_ACTION_MESSAGES: Record<string, string> = {
+      web_search: `Searching the web for "${cleanedQuery}"...`,
+      weather_api: `Fetching live weather data for "${cleanedQuery}"...`,
+      github_api: `Querying GitHub API for "${cleanedQuery}"...`,
+      db_query: `Retrieving database metrics & workspace analytics...`,
+      search_documents: `Searching document vector database for "${cleanedQuery}"...`,
+    };
+
+    const TOOL_DONE_MESSAGES: Record<string, string> = {
+      web_search: `Searched online web sources`,
+      weather_api: `Retrieved live weather forecast`,
+      github_api: `Fetched GitHub repository data`,
+      db_query: `Retrieved workspace database stats`,
+      search_documents: `Retrieved knowledge base chunks`,
+    };
+
+    for (const toolName of mcpToolsToRun) {
+      const actionMsg = TOOL_ACTION_MESSAGES[toolName] || `Executing ${toolName}...`;
+      sendEvent('tool_start', { toolName, message: actionMsg });
+
+      const result = await executeTool(
+        toolName,
+        { query: cleanedQuery, location: cleanedQuery, endpoint: cleanedQuery },
+        workspaceId
+      );
+
+      const doneMsg = TOOL_DONE_MESSAGES[toolName] || `Executed ${toolName}`;
+      sendEvent('tool_done', { toolName, message: doneMsg, success: result.success });
+
+      if (result.success && result.result) {
+        executedToolResults.push(`[MCP TOOL EXECUTION OUTPUT - ${toolName.toUpperCase()}]\nResult Data:\n${JSON.stringify(result.result, null, 2)}`);
+      }
+    }
+
+    if (executedToolResults.length > 0) {
+      toolContextString = `\n\n--- CRITICAL: LIVE REAL-TIME TOOL EXECUTION DATA ---\n${executedToolResults.join('\n\n')}\n--- MANDATORY INSTRUCTION FOR ASSISTANT ---\nYou MUST base your answer directly on the LIVE REAL-TIME TOOL EXECUTION DATA provided above. Do NOT say you do not have real-time information or mention your training knowledge cutoff. Treat the live tool data above as authoritative real-time facts.`;
+    }
+
+    // Prepare previous conversation history for multi-turn LLM context
+    const previousMessages = conversation.messages.map((m) => ({
+      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+      content: m.content,
+    }));
+    previousMessages.push({ role: 'user', content: cleanedQuery });
+
     // 4. Stream completion from Groq API
-    const finalSystemPrompt = (conversation.agent?.systemPrompt || 'You are an AI Assistant.') + toolContextString;
+    const baseSystemPrompt = conversation.agent?.systemPrompt || 'You are an intelligent AI Assistant.';
+    const finalSystemPrompt = `${baseSystemPrompt}${toolContextString}`;
+
     const finalResponseText = await streamGroqCompletion({
       systemPrompt: finalSystemPrompt,
       ragContext: ragContextString,
@@ -174,6 +270,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
         sendEvent('chunk', { content: chunkText });
       },
     });
+
 
     // 5. Store final assistant message with citations
     const assistantMsg = await addMessage(

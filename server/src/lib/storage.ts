@@ -45,7 +45,7 @@ export async function ensureBucketExists(): Promise<boolean> {
         logger.info(`[MinIO Storage] Created bucket '${BUCKET_NAME}'.`);
         return true;
       } catch (createErr) {
-        logger.warn(`[MinIO Storage] Failed to create bucket '${BUCKET_NAME}'. Falling back to local storage.`, createErr);
+        logger.warn({ err: createErr }, `[MinIO Storage] Failed to create bucket '${BUCKET_NAME}'. Falling back to local storage.`);
         return false;
       }
     }
@@ -69,9 +69,10 @@ export async function uploadFileToStorage(fileKey: string, buffer: Buffer, conte
       logger.info(`[MinIO Storage] Uploaded '${fileKey}' to MinIO bucket.`);
       return true;
     } catch (err) {
-      logger.error(`[MinIO Storage] Upload to MinIO failed for '${fileKey}'. Writing to local disk fallback.`, err);
+      logger.error({ err }, `[MinIO Storage] Upload to MinIO failed for '${fileKey}'. Writing to local disk fallback.`);
     }
   }
+
 
   // Local disk fallback
   await fs.mkdir(localUploadDir, { recursive: true });
