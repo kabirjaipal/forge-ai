@@ -138,7 +138,6 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
 
     // 3b. Execute attached Agent Tools or explicit @tool_name user mentions in chat
     let toolContextString = '';
-    const agentTools = conversation.agent?.agentTools || [];
     const executedToolResults: string[] = [];
     const lowerContent = content.toLowerCase();
 

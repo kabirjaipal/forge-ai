@@ -7,7 +7,7 @@ let documentQueue: Queue | null = null;
 
 export function initQueues() {
   try {
-    const connection = getRedisClient() as any;
+    const connection = getRedisClient();
 
     documentQueue = new Queue(DOCUMENT_QUEUE_NAME, { connection });
 
