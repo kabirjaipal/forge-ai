@@ -3,6 +3,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import prisma from '../lib/prisma.js';
 
 export interface McpToolResult {
   content: Array<{ type: 'text'; text: string }>;
@@ -264,11 +265,53 @@ export class ForgeAIMcpServer {
           return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
         }
 
-        default:
+        default: {
+          const dbTool = await prisma.tool.findFirst({
+            where: {
+              name: toolName,
+              ...(_workspaceId ? { OR: [{ workspaceId: _workspaceId }, { workspaceId: null }] } : {}),
+            },
+          });
+
+          if (!dbTool || !dbTool.url) {
+            return {
+              isError: true,
+              content: [{ type: 'text', text: `Error: Tool "${toolName}" is not registered.` }],
+            };
+          }
+
+          const method = (dbTool.method || 'POST').toUpperCase();
+          let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (dbTool.headers && typeof dbTool.headers === 'object') {
+            headers = { ...headers, ...(dbTool.headers as Record<string, string>) };
+          }
+
+          let response: Response;
+          if (method === 'GET') {
+            const queryParams = new URLSearchParams(args as Record<string, string>).toString();
+            const fullUrl = dbTool.url.includes('?') ? `${dbTool.url}&${queryParams}` : `${dbTool.url}?${queryParams}`;
+            response = await globalThis.fetch(fullUrl, { method: 'GET', headers });
+          } else {
+            response = await globalThis.fetch(dbTool.url, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(args),
+            });
+          }
+
+          if (!response.ok) {
+            const errText = await response.text();
+            return {
+              isError: true,
+              content: [{ type: 'text', text: `Custom Tool HTTP ${response.status}: ${errText}` }],
+            };
+          }
+
+          const resultText = await response.text();
           return {
-            isError: true,
-            content: [{ type: 'text', text: `Error: Tool "${toolName}" is not registered.` }],
+            content: [{ type: 'text', text: resultText }],
           };
+        }
       }
     } catch (err: any) {
       return {

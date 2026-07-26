@@ -13,6 +13,7 @@ import {
 import { searchRelevantChunks } from '../services/ragService.js';
 import { streamGroqCompletion } from '../services/groqService.js';
 import { executeTool } from '../services/toolService.js';
+import prisma from '../lib/prisma.js';
 
 const createConvoSchema = z.object({
   title: z.string().min(1).max(200),
@@ -141,17 +142,23 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     const executedToolResults: string[] = [];
     const lowerContent = content.toLowerCase();
 
-    // Execute tools ONLY when explicitly mentioned via their exact name: @web_search or @weather_api
+    // Execute tools when explicitly mentioned via @tool_name or assigned to the agent
     const mcpToolsToRun = new Set<string>();
 
-    if (lowerContent.includes('@web_search')) {
-      mcpToolsToRun.add('web_search');
-    }
+    const workspaceTools = await prisma.tool.findMany({
+      where: {
+        OR: [
+          { isCustom: false },
+          { workspaceId },
+        ],
+      },
+    });
 
-    if (lowerContent.includes('@weather_api')) {
-      mcpToolsToRun.add('weather_api');
+    for (const tool of workspaceTools) {
+      if (lowerContent.includes(`@${tool.name.toLowerCase()}`)) {
+        mcpToolsToRun.add(tool.name);
+      }
     }
-
 
     const TOOL_ACTION_MESSAGES: Record<string, string> = {
       web_search: `Searching the web for "${cleanedQuery}"...`,
@@ -182,7 +189,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     }
 
     if (executedToolResults.length > 0) {
-      toolContextString = `\n\n--- CRITICAL: LIVE REAL-TIME TOOL EXECUTION DATA ---\n${executedToolResults.join('\n\n')}\n--- MANDATORY INSTRUCTION FOR ASSISTANT ---\nYou MUST base your answer directly on the LIVE REAL-TIME TOOL EXECUTION DATA provided above. Do NOT say you do not have real-time information or mention your training knowledge cutoff. Treat the live tool data above as authoritative real-time facts.`;
+      toolContextString = `\n\n--- MCP TOOL EXECUTION RESULTS ---\n${executedToolResults.join('\n\n')}\n--- INSTRUCTION FOR ASSISTANT ---\nIncorporate the tool execution results provided above into your response accurately based on the data returned by the executed tools.`;
     }
 
     // 4. Sliding Context Window (Fast & Efficient like ChatGPT: last 14 messages max)

@@ -154,6 +154,14 @@ export async function deleteAgent(id: string, workspaceId: string, userId: strin
   return { deleted: true };
 }
 
-export async function getTools() {
-  return prisma.tool.findMany({ orderBy: { name: 'asc' } });
+export async function getTools(workspaceId?: string) {
+  return prisma.tool.findMany({
+    where: {
+      OR: [
+        { isCustom: false },
+        ...(workspaceId ? [{ workspaceId }] : []),
+      ],
+    },
+    orderBy: { name: 'asc' },
+  });
 }

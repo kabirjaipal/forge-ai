@@ -46,7 +46,7 @@ export function useAgents(workspaceId: string | undefined) {
 export function useTools(workspaceId: string | undefined) {
   return useQuery({
     queryKey: ['tools', workspaceId],
-    queryFn: () => api.get<Tool[]>(`/workspaces/${workspaceId}/agents/tools`),
+    queryFn: () => api.get<Tool[]>(`/workspaces/${workspaceId}/tools`),
     enabled: !!workspaceId,
     select: (res) => res.data ?? [],
   });

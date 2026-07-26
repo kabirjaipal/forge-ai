@@ -80,6 +80,7 @@ model Workspace {
   documents     Document[]
   agents        Agent[]
   conversations Conversation[]
+  tools         Tool[]
 
   @@map("workspaces")
 }
@@ -150,10 +151,16 @@ model Agent {
 
 model Tool {
   id          String      @id @default(uuid())
+  workspaceId String?
   name        String      @unique // search_docs, web_search, db_query, github_api, weather_api
   description String
   schema      Json        // JSON Schema defining input parameters
+  url         String?
+  method      String?     @default("POST")
+  headers     Json?
+  isCustom    Boolean     @default(false)
   createdAt   DateTime    @default(now())
+  workspace   Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   agentTools  AgentTool[]
 
   @@map("tools")

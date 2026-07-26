@@ -7,6 +7,7 @@ import agentRoutes from './agentRoutes.js';
 import conversationRoutes from './conversationRoutes.js';
 import analyticsRoutes from './analyticsRoutes.js';
 import mcpRoutes from './mcpRoutes.js';
+import toolRoutes from './toolRoutes.js';
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.use('/api/v1/mcp', mcpRoutes);
 // Workspace-scoped resources
 router.use('/api/v1/workspaces/:workspaceId/documents', documentRoutes);
 router.use('/api/v1/workspaces/:workspaceId/agents', agentRoutes);
+router.use('/api/v1/workspaces/:workspaceId/tools', toolRoutes);
 router.use('/api/v1/workspaces/:workspaceId/conversations', conversationRoutes);
 
 // Analytics routes

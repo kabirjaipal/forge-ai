@@ -34,6 +34,7 @@ import {
   type Message,
 } from '@/lib/hooks/useConversations';
 import { useAgents } from '@/lib/hooks/useAgents';
+import { useTools } from '@/lib/hooks/useTools';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -227,20 +228,23 @@ export default function ChatPage() {
   const [toolSearchQuery, setToolSearchQuery] = useState('');
 
   const { data: activeConvo } = useConversation(workspaceId, activeConvoId || undefined);
+  const { data: dbTools = [] } = useTools(workspaceId);
 
-  // Compute available tools: if agent is selected with specific tools, show those; if no agent, show ALL tools
+  // Compute available tools dynamically from workspace tools (built-in + custom)
   const availableTools = useMemo(() => {
+    const formattedTools = dbTools.map((t) => ({
+      tag: `@${t.name}`,
+      name: t.name,
+      description: t.description,
+    }));
+
     const agentTools = activeConvo?.agent?.agentTools;
     if (agentTools && agentTools.length > 0) {
       const assignedNames = new Set(agentTools.map((at) => at.tool.name));
-      return ALL_TOOLS.filter((tool) => {
-        if (tool.tag === '@weather_api' && assignedNames.has('weather_api')) return true;
-        if (tool.tag === '@web_search' && assignedNames.has('web_search')) return true;
-        return false;
-      });
+      return formattedTools.filter((tool) => assignedNames.has(tool.name));
     }
-    return ALL_TOOLS;
-  }, [activeConvo?.agent?.agentTools]);
+    return formattedTools;
+  }, [dbTools, activeConvo?.agent?.agentTools]);
 
   const filteredToolSuggestions = useMemo(() => {
     if (!toolSearchQuery) return availableTools;
@@ -815,7 +819,6 @@ export default function ChatPage() {
                       onClick={() => insertToolTag(tool.tag)}
                       className="w-full text-left p-2 rounded-lg hover:bg-primary/10 transition-colors flex items-center gap-2.5 group cursor-pointer"
                     >
-                      <span className="text-base">{tool.icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-xs text-primary">{tool.tag}</span>

@@ -30,9 +30,10 @@ export async function seedTools(): Promise<void> {
   try {
     const allowedNames = DEFAULT_TOOLS.map((t) => t.name);
 
-    // Delete obsolete tools from DB
+    // Delete obsolete non-custom system tools from DB (preserve custom user tools)
     await prisma.tool.deleteMany({
       where: {
+        isCustom: false,
         name: { notIn: allowedNames },
       },
     });
@@ -43,11 +44,13 @@ export async function seedTools(): Promise<void> {
         update: {
           description: tool.description,
           schema: tool.schema,
+          isCustom: false,
         },
         create: {
           name: tool.name,
           description: tool.description,
           schema: tool.schema,
+          isCustom: false,
         },
       });
     }

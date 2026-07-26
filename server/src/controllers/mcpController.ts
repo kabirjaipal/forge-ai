@@ -1,13 +1,36 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/auth.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
-import { mcpServer, MCP_TOOLS_DEFINITIONS } from '../services/mcpService.js';
+import { mcpServer } from '../services/mcpService.js';
+import prisma from '../lib/prisma.js';
 
-export const listMcpTools = asyncHandler(async (_req: AuthRequest, res: Response) => {
+async function getAllMcpTools(workspaceId?: string) {
+  const dbTools = await prisma.tool.findMany({
+    where: {
+      OR: [
+        { isCustom: false },
+        ...(workspaceId ? [{ workspaceId }] : []),
+      ],
+    },
+  });
+
+  return dbTools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.schema,
+    isCustom: t.isCustom,
+    url: t.url,
+  }));
+}
+
+export const listMcpTools = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const workspaceId = (req.query['workspaceId'] as string) || (req.params['workspaceId'] as string);
+  const tools = await getAllMcpTools(workspaceId);
+
   res.json({
     jsonrpc: '2.0',
     result: {
-      tools: MCP_TOOLS_DEFINITIONS,
+      tools,
     },
   });
 });
@@ -19,26 +42,29 @@ export const handleMcpRpc = asyncHandler(async (req: AuthRequest, res: Response)
     params?: any;
     id?: string | number;
   };
+  const workspaceId = (params?.['workspaceId'] as string) || (req.query['workspaceId'] as string) || '';
 
   if (jsonrpc !== '2.0' && method !== 'tools/list' && method !== 'tools/call') {
+    const tools = await getAllMcpTools(workspaceId);
     // Standard response if non-JSON-RPC body
     res.json({
       success: true,
       data: {
         server: 'ForgeAI MCP Protocol Server',
         version: '1.0.0',
-        availableTools: MCP_TOOLS_DEFINITIONS.map((t) => t.name),
+        availableTools: tools.map((t) => t.name),
       },
     });
     return;
   }
 
   if (method === 'tools/list') {
+    const tools = await getAllMcpTools(workspaceId);
     res.json({
       jsonrpc: '2.0',
       id: id || 1,
       result: {
-        tools: MCP_TOOLS_DEFINITIONS,
+        tools,
       },
     });
     return;

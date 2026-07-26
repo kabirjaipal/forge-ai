@@ -113,6 +113,7 @@ export default function DashboardLayout({
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Knowledge Base', href: '/dashboard/documents', icon: FileText },
     { name: 'AI Agents', href: '/dashboard/agents', icon: Bot },
+    { name: 'MCP Tools', href: '/dashboard/tools', icon: Cpu },
     { name: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },

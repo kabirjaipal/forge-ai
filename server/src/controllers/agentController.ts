@@ -69,7 +69,8 @@ export const deleteAgentHandler = asyncHandler(async (req: AuthRequest, res: Res
   res.json({ success: true, data: { deleted: true } });
 });
 
-export const listTools = asyncHandler(async (_req: AuthRequest, res: Response) => {
-  const tools = await getTools();
+export const listTools = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const workspaceId = req.params['workspaceId'];
+  const tools = await getTools(workspaceId);
   res.json({ success: true, data: tools });
 });
