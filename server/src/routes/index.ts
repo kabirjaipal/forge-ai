@@ -6,6 +6,7 @@ import documentRoutes from './documentRoutes.js';
 import agentRoutes from './agentRoutes.js';
 import conversationRoutes from './conversationRoutes.js';
 import analyticsRoutes from './analyticsRoutes.js';
+import extractionRoutes from './extractionRoutes.js';
 
 const router = Router();
 
@@ -18,6 +19,8 @@ router.use('/api/v1/workspaces', workspaceRoutes);
 router.use('/api/v1/workspaces/:workspaceId/documents', documentRoutes);
 router.use('/api/v1/workspaces/:workspaceId/agents', agentRoutes);
 router.use('/api/v1/workspaces/:workspaceId/conversations', conversationRoutes);
+router.use('/api/v1/workspaces/:workspaceId/extract', extractionRoutes);
+
 
 // Analytics routes
 router.use('/api/v1/analytics', analyticsRoutes);

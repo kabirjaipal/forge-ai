@@ -1,0 +1,59 @@
+name: ForgeAI CI Workflow
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-check:
+    name: Backend Build & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'server/package-lock.json'
+
+      - name: Install Dependencies
+        run: |
+          cd server
+          npm ci
+
+      - name: Generate Prisma Client
+        run: |
+          cd server
+          npx prisma generate
+
+      - name: Typecheck & Build Backend
+        run: |
+          cd server
+          npm run build
+
+  frontend-check:
+    name: Frontend Build & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'client/package-lock.json'
+
+      - name: Install Dependencies
+        run: |
+          cd client
+          npm ci
+
+      - name: Build Next.js App
+        run: |
+          cd client
+          npm run build

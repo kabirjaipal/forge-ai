@@ -11,12 +11,15 @@ import {
   Clock,
   XCircle,
   FilePlus,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useDocuments, useDeleteDocument, uploadDocument } from '@/lib/hooks/useDocuments';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useQueryClient } from '@tanstack/react-query';
+import { StructuredExtractorModal } from '@/components/extraction/StructuredExtractorModal';
+
 
 const FILE_TYPE_ICONS: Record<string, string> = {
   pdf: '📄',
@@ -51,7 +54,9 @@ export default function DocumentsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [extractModalDoc, setExtractModalDoc] = useState<{ id: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -207,6 +212,15 @@ export default function DocumentsPage() {
                         <StatusIcon className={`w-3.5 h-3.5 ${doc.status === 'processing' ? 'animate-spin' : ''}`} />
                         {status.label}
                       </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2.5 text-xs flex items-center gap-1.5"
+                        onClick={() => setExtractModalDoc({ id: doc.id, name: doc.name })}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-primary" />
+                        Extract Data
+                      </Button>
                       {deleteConfirm === doc.id ? (
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-danger font-medium">Delete?</span>
@@ -238,6 +252,17 @@ export default function DocumentsPage() {
           </div>
         )}
       </div>
+
+      {extractModalDoc && workspaceId && (
+        <StructuredExtractorModal
+          isOpen={!!extractModalDoc}
+          onClose={() => setExtractModalDoc(null)}
+          workspaceId={workspaceId}
+          documentId={extractModalDoc.id}
+          documentName={extractModalDoc.name}
+        />
+      )}
     </div>
   );
 }
+
