@@ -20,6 +20,12 @@ export function useDocuments(workspaceId: string | undefined) {
     queryFn: () => api.get<Document[]>(`/workspaces/${workspaceId}/documents`),
     enabled: !!workspaceId,
     select: (res) => res.data ?? [],
+    refetchInterval: (query) => {
+      const raw = query.state.data as { data?: Document[] } | undefined;
+      const docs = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+      const isProcessing = docs.some((d) => d.status === 'pending' || d.status === 'processing');
+      return isProcessing ? 2000 : false;
+    },
   });
 }
 

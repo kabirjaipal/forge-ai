@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
   },
 });
 
-const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: unknown, file: { originalname: string }, cb: multer.FileFilterCallback) => {
   const ext = getExtension(file.originalname);
   if (!isAllowedFileType(ext)) {
     cb(new AppError(`File type .${ext} is not allowed. Allowed: pdf, docx, md, csv, txt`, 400, 'INVALID_FILE_TYPE'));

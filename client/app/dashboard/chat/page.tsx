@@ -10,7 +10,6 @@ import {
   User,
   Sparkles,
   Loader2,
-  ChevronRight,
   X,
   AlertCircle,
   Search,
@@ -22,8 +21,9 @@ import {
   Check,
   RotateCcw,
   ArrowUpRight,
-  Filter,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAuth } from '@/lib/auth-context';
 import {
   useConversations,
@@ -34,7 +34,6 @@ import {
 } from '@/lib/hooks/useConversations';
 import { useAgents } from '@/lib/hooks/useAgents';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -120,11 +119,55 @@ function MessageBubble({
               : 'bg-background text-foreground border border-border/80 rounded-tl-xs shadow-xs'
           }`}
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="prose prose-sm max-w-none text-foreground leading-relaxed">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed text-foreground">{children}</p>,
+                  strong: ({ children }) => <strong className="font-bold text-foreground">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-foreground/90">{children}</em>,
+                  ul: ({ children }) => <ul className="list-disc pl-5 my-2.5 space-y-1 text-foreground">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-5 my-2.5 space-y-1 text-foreground">{children}</ol>,
+                  li: ({ children }) => <li className="my-1 text-foreground">{children}</li>,
+                  h1: ({ children }) => <h1 className="text-base font-bold text-foreground mt-3 mb-2">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-sm font-bold text-foreground mt-3 mb-1.5">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-xs font-bold text-foreground mt-2 mb-1">{children}</h3>,
+                  code: ({ inline, className, children, ...props }: any) => {
+                    return inline ? (
+                      <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono text-primary border border-border/60" {...props}>
+                        {children}
+                      </code>
+                    ) : (
+                      <pre className="bg-muted/70 p-3 rounded-xl font-mono text-xs overflow-x-auto my-2.5 border border-border">
+                        <code className="text-foreground" {...props}>{children}</code>
+                      </pre>
+                    );
+                  },
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-3 border-primary/50 pl-3.5 italic text-muted-foreground my-2.5 bg-primary/5 py-1.5 pr-2 rounded-r-lg">
+                      {children}
+                    </blockquote>
+                  ),
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto my-3 border border-border rounded-xl">
+                      <table className="min-w-full divide-y divide-border text-xs">{children}</table>
+                    </div>
+                  ),
+                  th: ({ children }) => <th className="bg-muted/60 px-3 py-2 text-left font-semibold text-foreground">{children}</th>,
+                  td: ({ children }) => <td className="px-3 py-2 border-t border-border/40 text-foreground">{children}</td>,
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
           {!isUser && (
             <button
               onClick={handleCopy}
-              className="absolute top-2 right-2 p-1 rounded-md bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+              className="absolute top-2.5 right-2.5 p-1 rounded-md bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
               title="Copy message"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}

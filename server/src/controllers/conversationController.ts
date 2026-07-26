@@ -10,6 +10,8 @@ import {
   addMessage,
   getAnalytics,
 } from '../services/conversationService.js';
+import { searchRelevantChunks } from '../services/ragService.js';
+import { streamGroqCompletion } from '../services/groqService.js';
 
 const createConvoSchema = z.object({
   title: z.string().min(1).max(200),
@@ -89,10 +91,38 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    // Store user message
+    // 1. Fetch conversation details to check attached agent and message history
+    const conversation = await getConversationById(id, workspaceId, req.user.id);
+    const agentId = conversation.agentId || undefined;
+
+    // 2. Store user message in database
     await addMessage(id, workspaceId, req.user.id, 'user', content);
 
-    // Set up SSE headers for streaming
+    // 3. Perform RAG Vector Similarity Search across workspace/agent document chunks
+    const ragMatches = await searchRelevantChunks(workspaceId, content, agentId, 4);
+
+    let ragContextString = '';
+    const citations = ragMatches.map((match) => ({
+      documentId: match.documentId,
+      documentName: match.documentName,
+      snippet: match.content,
+      relevanceScore: Math.round(match.score * 100) / 100,
+    }));
+
+    if (ragMatches.length > 0) {
+      ragContextString = ragMatches
+        .map((m, idx) => `[Source ${idx + 1}: ${m.documentName}]\n${m.content}`)
+        .join('\n\n');
+    }
+
+    // Prepare previous conversation history for multi-turn LLM context
+    const previousMessages = conversation.messages.map((m) => ({
+      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
+      content: m.content,
+    }));
+    previousMessages.push({ role: 'user', content });
+
+    // Set up SSE headers for streaming response
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -104,27 +134,39 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    // Phase 1: Simulated streaming response (replace with real LLM in Phase 2)
-    const simulatedResponse = `I'm ForgeAI's AI assistant! You said: "${content}"\n\nIn Phase 2, I'll connect to a real language model (Groq/OpenAI) and retrieve relevant context from your uploaded documents using RAG (Retrieval-Augmented Generation). For now, this confirms the streaming pipeline is working correctly.`;
+    sendEvent('start', { conversationId: id, ragMatchesCount: ragMatches.length });
 
-    sendEvent('start', { conversationId: id });
+    // 4. Stream completion from Groq API
+    const finalResponseText = await streamGroqCompletion({
+      systemPrompt: conversation.agent?.systemPrompt,
+      ragContext: ragContextString,
+      messages: previousMessages,
+      model: conversation.agent?.model || 'llama-3.3-70b-versatile',
+      temperature: conversation.agent?.temperature ?? 0.7,
+      onChunk: (chunkText) => {
+        sendEvent('chunk', { content: chunkText });
+      },
+    });
 
-    const words = simulatedResponse.split(' ');
-    let accumulated = '';
-    for (const word of words) {
-      await new Promise((r) => setTimeout(r, 30));
-      const chunk = word + ' ';
-      accumulated += chunk;
-      sendEvent('chunk', { content: chunk });
-    }
+    // 5. Store final assistant message with citations
+    const assistantMsg = await addMessage(
+      id,
+      workspaceId,
+      req.user.id,
+      'assistant',
+      finalResponseText.trim(),
+      citations.length > 0 ? citations : undefined,
+    );
 
-    // Store assistant message
-    const assistantMsg = await addMessage(id, workspaceId, req.user.id, 'assistant', accumulated.trim());
-
-    sendEvent('done', { messageId: assistantMsg.id, content: accumulated.trim() });
+    sendEvent('done', {
+      messageId: assistantMsg.id,
+      content: finalResponseText.trim(),
+      citations,
+    });
     res.end();
-  } catch (error: any) {
-    res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
     res.end();
   }
 };

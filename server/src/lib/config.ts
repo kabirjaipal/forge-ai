@@ -18,8 +18,8 @@ const configSchema = z.object({
   LOG_PRETTY: z.coerce.boolean().default(false),
   TRUST_PROXY: z.coerce.boolean().default(true),
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
-  OPENAI_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
+  GROQ_BASE_URL: z.string().default('https://api.groq.com/openai/v1'),
 });
 
 const configResult = configSchema.safeParse(process.env);
