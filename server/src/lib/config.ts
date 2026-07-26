@@ -8,7 +8,7 @@ const configSchema = z.object({
   PORT: z.coerce.number().default(3001),
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/forgeai?schema=public'),
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().default('super-secret-jwt-key-forgeai-change-in-production'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),

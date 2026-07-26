@@ -98,7 +98,7 @@ export default function DocumentsPage() {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="w-full flex-1 flex flex-col min-h-0 overflow-y-auto p-6 md:p-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold font-heading text-foreground">Knowledge Base</h1>
         <p className="text-sm text-muted-foreground mt-1">

@@ -14,8 +14,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ForgeAI — AI Workspace for Documents, Agents & Automation",
-  description: "Upload documents, build custom AI agents, chat with RAG, and automate workflows in a single workspace.",
+  title: "ForgeAI — AI Workspace for Documents & Agents",
+  description: "Upload documents, build custom AI agents, and chat with RAG in a single workspace.",
 };
 
 export default function RootLayout({

@@ -15,6 +15,7 @@ export interface StreamGroqInput {
 /**
  * Streams completion tokens from Groq API via SSE readable stream.
  * Default model: llama-3.3-70b-versatile
+ * Throws explicit errors on API or config failure — NO custom fallback assistant messages.
  */
 export async function streamGroqCompletion(input: StreamGroqInput): Promise<string> {
   const { systemPrompt, ragContext, messages, model, temperature, onChunk } = input;
@@ -23,20 +24,7 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
   const isRealApiKey = apiKey && apiKey.startsWith('gsk_') && !apiKey.includes('your_groq_api_key_here');
 
   if (!isRealApiKey) {
-    const missingKeyNotice =
-      `[Groq Setup Required]\n` +
-      `GROQ_API_KEY is not configured in server/.env.\n\n` +
-      `To enable live AI completions using Llama 3.3 / Mixtral:\n` +
-      `1. Get a free API key at https://console.groq.com\n` +
-      `2. Set GROQ_API_KEY=gsk_... in server/.env\n\n` +
-      (ragContext ? `RAG Knowledge Context retrieved:\n${ragContext}` : '');
-
-    const words = missingKeyNotice.split(' ');
-    for (const word of words) {
-      await new Promise((r) => setTimeout(r, 20));
-      await onChunk(word + ' ');
-    }
-    return missingKeyNotice;
+    throw new Error('Groq API key is missing or invalid in server/.env. Please configure a valid GROQ_API_KEY.');
   }
 
   // 1. Construct system prompt & RAG context
@@ -114,6 +102,10 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<stri
         }
       }
     }
+  }
+
+  if (!accumulatedText.trim()) {
+    throw new Error('AI returned an empty response.');
   }
 
   return accumulatedText;

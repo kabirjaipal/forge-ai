@@ -35,6 +35,7 @@ import {
 import { useAgents } from '@/lib/hooks/useAgents';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -62,9 +63,9 @@ const QUICK_STARTERS = [
   },
   {
     icon: Zap,
-    title: 'Automation Workflow',
-    prompt: 'Design an automated event-driven workflow for document ingestion.',
-    badge: 'Workflows',
+    title: 'Multi-Tool Search',
+    prompt: 'Query live web data, weather info, and database metrics using agent tools.',
+    badge: 'Tools',
   },
   {
     icon: BarChart3,
@@ -293,6 +294,10 @@ export default function ChatPage() {
           if (line.startsWith('data:')) {
             try {
               const data = JSON.parse(line.slice(5).trim());
+              if (data.message) {
+                setError(`AI Error: ${data.message}`);
+                setStreamingContent(null);
+              }
               if (data.content) {
                 accumulated += data.content;
                 setStreamingContent(accumulated);
@@ -328,9 +333,9 @@ export default function ChatPage() {
   const displayMessages = localMessages;
 
   return (
-    <div className="-m-6 md:-m-8 flex flex-col md:flex-row h-[calc(100%+3rem)] md:h-[calc(100%+4rem)] w-[calc(100%+3rem)] md:w-[calc(100%+4rem)] overflow-hidden rounded-2xl">
+    <div className="flex flex-col md:flex-row h-full w-full min-h-0 overflow-hidden rounded-2xl">
       {/* Sidebar Panel */}
-      <aside className="w-full md:w-80 bg-background border-r border-border flex flex-col shrink-0 overflow-hidden">
+      <aside className="w-full md:w-80 bg-background border-r border-border flex flex-col shrink-0 min-h-0 overflow-hidden">
         {/* Header & New Button */}
         <div className="p-3.5 border-b border-border space-y-3">
           <Button
@@ -353,29 +358,17 @@ export default function ChatPage() {
             />
           </div>
 
-          {/* Filter Tabs */}
-          <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-xl">
-            <button
-              onClick={() => setFilterType('all')}
-              className={`flex-1 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                filterType === 'all'
-                  ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              All ({conversations?.length || 0})
-            </button>
-            <button
-              onClick={() => setFilterType('agents')}
-              className={`flex-1 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                filterType === 'agents'
-                  ? 'bg-background text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Agents Only
-            </button>
-          </div>
+          {/* Filter Tabs using Official Shadcn UI Component with Bootstrap Button Group style */}
+          <Tabs value={filterType} onValueChange={(val) => setFilterType(val as 'all' | 'agents')} className="w-full">
+            <TabsList variant="buttonGroup" className="w-full grid grid-cols-2 h-8">
+              <TabsTrigger value="all">
+                All ({conversations?.length || 0})
+              </TabsTrigger>
+              <TabsTrigger value="agents">
+                Agents Only
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
         {/* New Conversation Form */}
@@ -395,7 +388,10 @@ export default function ChatPage() {
                 onValueChange={(val) => setSelectedAgentId(val && val !== 'none' ? val : '')}
               >
                 <SelectTrigger className="w-full h-9 rounded-xl bg-background border-border text-xs">
-                  <SelectValue placeholder="Select agent (optional)" />
+                  <SelectValue placeholder="Select agent (optional)">
+                    {agents.find((a) => a.id === selectedAgentId)?.name ||
+                      (selectedAgentId === 'none' ? 'No agent (general chat)' : null)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No agent (general chat)</SelectItem>
@@ -502,7 +498,7 @@ export default function ChatPage() {
       </aside>
 
       {/* Main Canvas */}
-      <div className="flex-1 flex flex-col bg-background overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col bg-background overflow-hidden min-w-0 min-h-0">
         {!activeConvoId ? (
           <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
             <div className="max-w-xl w-full text-center space-y-6">

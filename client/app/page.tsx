@@ -83,7 +83,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="mt-6 text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-          Upload documents, query custom knowledge bases with instant RAG, create tool-empowered AI agents, and run automated workflows — all in one unified platform.
+          Upload documents, query custom knowledge bases with instant RAG, and create tool-empowered AI agents — all in one unified platform.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">

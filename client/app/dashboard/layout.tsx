@@ -114,7 +114,6 @@ export default function DashboardLayout({
     { name: 'Knowledge Base', href: '/dashboard/documents', icon: FileText },
     { name: 'AI Agents', href: '/dashboard/agents', icon: Bot },
     { name: 'AI Chat', href: '/dashboard/chat', icon: MessageSquare },
-    { name: 'Workflows', href: '/dashboard/workflows', icon: Cpu },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
@@ -279,10 +278,8 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Workspace Canvas */}
-      <main className="flex-1 bg-background border border-border rounded-2xl flex flex-col min-w-0 overflow-y-auto shadow-sm">
-        <div className="p-6 md:p-8 w-full flex-1 flex flex-col">
-          {children}
-        </div>
+      <main className="flex-1 bg-background border border-border rounded-2xl flex flex-col min-w-0 min-h-0 overflow-hidden shadow-sm">
+        {children}
       </main>
 
       {/* Create Workspace Shared Dialog */}

@@ -12,6 +12,7 @@ import { toNodeHandler } from 'better-auth/node';
 import { auth } from './lib/betterAuth.js';
 import routes from './routes/index.js';
 import { seedTools } from './lib/seedTools.js';
+import { initQueues } from './lib/queue.js';
 
 declare global {
   namespace Express {
@@ -96,6 +97,7 @@ async function startServer() {
       logger.info(`🚀 Server listening at http://${config.HOST}:${config.PORT} (${config.NODE_ENV})`);
       // Seed default tools in background (non-blocking)
       seedTools().catch((err) => logger.error({ err }, 'Tool seeding failed'));
+      initQueues();
     });
 
     server.keepAliveTimeout = 65_000;

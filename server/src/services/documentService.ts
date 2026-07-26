@@ -25,19 +25,53 @@ export function isAllowedFileType(ext: string): ext is FileType {
 }
 
 /**
- * Strips null bytes (0x00) and unsupported UTF-8 control characters that cause
- * PostgreSQL encoding error 22021 during database insertion.
+ * Strips null bytes (0x00), lone surrogate pairs, and non-printable UTF-8 control characters
+ * that cause Prisma Rust JSON engine error "lone leading surrogate in hex escape".
  */
 function sanitizeUtf8Text(input: string): string {
   if (!input) return '';
-  let result = '';
-  for (let i = 0; i < input.length; i++) {
-    const code = input.charCodeAt(i);
-    if (code !== 0 && (code >= 32 || code === 9 || code === 10 || code === 13)) {
-      result += input[i];
-    }
+  // 1. Convert to well-formed string, removing lone surrogates
+  const safe = typeof (input as any).toWellFormed === 'function'
+    ? (input as any).toWellFormed()
+    : input.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+
+  // 2. Remove null bytes and non-printable control characters
+  return safe.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+}
+
+/**
+ * Cleans extracted text from PDF/binary wrappers, stripping PDF stream metadata,
+ * FlateDecode tags, and object stream markers.
+ */
+function cleanExtractedText(raw: string, fileType: string): string {
+  if (!raw) return '';
+  const sanitized = sanitizeUtf8Text(raw);
+  if (fileType.toLowerCase() === 'pdf') {
+    const lines = sanitized.split(/\r?\n/);
+    const cleaned = lines
+      .map((l) => l.trim())
+      .filter((l) => {
+        if (!l) return false;
+        if (
+          l.startsWith('%PDF-') ||
+          l.includes('FlateDecode') ||
+          l.includes('endstream') ||
+          l.includes('endobj') ||
+          l.includes('/Font') ||
+          l.includes('/MediaBox') ||
+          l.includes('/Filter') ||
+          l.includes('/Type')
+        ) {
+          return false;
+        }
+        // Filter out lines that look like raw PDF object identifiers, e.g. "12 0 obj"
+        if (/^\d+\s+\d+\s+obj$/.test(l)) return false;
+        return true;
+      })
+      .join(' ');
+    return sanitizeUtf8Text(cleaned);
   }
-  return result;
+  return sanitized;
 }
 
 export async function getDocuments(workspaceId: string, userId: string) {
@@ -119,8 +153,8 @@ export async function processDocumentAsync(documentId: string) {
       rawText = `Document Name: ${doc.name}\nType: ${doc.fileType}`;
     }
 
-    // Sanitize text to prevent PostgreSQL null byte 0x00 errors
-    const extractedText = sanitizeUtf8Text(rawText);
+    // Clean text and strip PDF stream metadata & lone surrogates
+    const extractedText = cleanExtractedText(rawText, doc.fileType);
 
     if (!extractedText || extractedText.trim().length === 0) {
       await prisma.document.update({
@@ -135,15 +169,15 @@ export async function processDocumentAsync(documentId: string) {
 
     if (chunks.length > 0) {
       // 2. Generate vector embeddings for chunks
-      const chunkTexts = chunks.map((c) => sanitizeUtf8Text(c.text));
+      const chunkTexts = chunks.map((c) => cleanExtractedText(c.text, doc.fileType));
       const embeddings = await generateEmbeddings(chunkTexts);
 
-      // 3. Save chunks into database
+      // 3. Save chunks into database with strict UTF-8 surrogate sanitization
       await prisma.documentChunk.createMany({
         data: chunks.map((chunk, idx) => ({
           documentId: doc.id,
           chunkIndex: chunk.index,
-          content: sanitizeUtf8Text(chunk.text),
+          content: cleanExtractedText(chunk.text, doc.fileType),
           metadata: { documentName: doc.name, fileType: doc.fileType },
           embedding: JSON.stringify(embeddings[idx] || []),
         })),

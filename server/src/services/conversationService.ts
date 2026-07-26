@@ -26,7 +26,7 @@ export async function getConversationById(id: string, workspaceId: string, userI
   const convo = await prisma.conversation.findFirst({
     where: { id, workspaceId },
     include: {
-      agent: { select: { id: true, name: true, avatar: true, systemPrompt: true, model: true, temperature: true } },
+      agent: { select: { id: true, name: true, avatar: true, systemPrompt: true, model: true, temperature: true, agentTools: { include: { tool: true } } } },
       messages: {
         orderBy: { createdAt: 'asc' },
         select: {

@@ -12,6 +12,7 @@ import {
 } from '../services/conversationService.js';
 import { searchRelevantChunks } from '../services/ragService.js';
 import { streamGroqCompletion } from '../services/groqService.js';
+import { executeTool } from '../services/toolService.js';
 
 const createConvoSchema = z.object({
   title: z.string().min(1).max(200),
@@ -115,6 +116,31 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
         .join('\n\n');
     }
 
+    // 3b. Execute attached Agent Tools if present
+    let toolContextString = '';
+    const agentTools = conversation.agent?.agentTools || [];
+    if (agentTools.length > 0) {
+      const executedToolResults: string[] = [];
+      const lowerContent = content.toLowerCase();
+      for (const at of agentTools) {
+        const toolName = at.tool.name;
+        if (
+          (toolName === 'weather_api' && (lowerContent.includes('weather') || lowerContent.includes('temp') || lowerContent.includes('forecast'))) ||
+          (toolName === 'web_search' && (lowerContent.includes('search') || lowerContent.includes('web') || lowerContent.includes('latest'))) ||
+          (toolName === 'db_query' && (lowerContent.includes('database') || lowerContent.includes('query') || lowerContent.includes('stats') || lowerContent.includes('count'))) ||
+          toolName === 'search_docs' || toolName === 'search_documents'
+        ) {
+          const result = await executeTool(toolName, { query: content, location: content }, workspaceId);
+          if (result.success && result.result) {
+            executedToolResults.push(`[Tool Execution: ${toolName}]\nResult: ${JSON.stringify(result.result, null, 2)}`);
+          }
+        }
+      }
+      if (executedToolResults.length > 0) {
+        toolContextString = `\n\n--- ACTIVE TOOL EXECUTION OUTPUTS ---\n${executedToolResults.join('\n\n')}\n--- END TOOL OUTPUTS ---`;
+      }
+    }
+
     // Prepare previous conversation history for multi-turn LLM context
     const previousMessages = conversation.messages.map((m) => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
@@ -137,8 +163,9 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     sendEvent('start', { conversationId: id, ragMatchesCount: ragMatches.length });
 
     // 4. Stream completion from Groq API
+    const finalSystemPrompt = (conversation.agent?.systemPrompt || 'You are an AI Assistant.') + toolContextString;
     const finalResponseText = await streamGroqCompletion({
-      systemPrompt: conversation.agent?.systemPrompt,
+      systemPrompt: finalSystemPrompt,
       ragContext: ragContextString,
       messages: previousMessages,
       model: conversation.agent?.model || 'llama-3.3-70b-versatile',
