@@ -2,7 +2,6 @@ import { Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
 import { AuthRequest } from '../types/auth.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 import {
@@ -12,19 +11,11 @@ import {
   deleteDocument,
   getExtension,
   isAllowedFileType,
+  getDocumentDownloadUrl,
 } from '../services/documentService.js';
+import { uploadFileToStorage } from '../lib/storage.js';
 
-// Configure local disk storage for Phase 1 (swap to S3 in Phase 2)
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${uuidv4()}${ext}`);
-  },
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (_req: unknown, file: { originalname: string }, cb: multer.FileFilterCallback) => {
   const ext = getExtension(file.originalname);
@@ -55,6 +46,13 @@ export const getDocument = asyncHandler(async (req: AuthRequest, res: Response) 
   res.json({ success: true, data: doc });
 });
 
+export const getDocumentDownloadLink = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  const { workspaceId, id } = req.params as { workspaceId: string; id: string };
+  const url = await getDocumentDownloadUrl(id, workspaceId, req.user.id);
+  res.json({ success: true, data: { downloadUrl: url } });
+});
+
 export const uploadDocument = (req: AuthRequest, res: Response) => {
   uploadMiddleware(req, res, async (err) => {
     if (err) {
@@ -77,11 +75,16 @@ export const uploadDocument = (req: AuthRequest, res: Response) => {
     try {
       const workspaceId = req.params['workspaceId']!;
       const ext = getExtension(req.file.originalname);
+      const fileKey = `${uuidv4()}.${ext}`;
+
+      // Upload raw file buffer to MinIO (or fallback to local disk)
+      await uploadFileToStorage(fileKey, req.file.buffer, req.file.mimetype);
+
       const doc = await createDocument({
         workspaceId,
         userId: req.user.id,
         name: req.body['name'] || req.file.originalname,
-        fileKey: req.file.filename,
+        fileKey,
         fileType: ext,
         fileSize: req.file.size,
       });

@@ -20,7 +20,14 @@ const configSchema = z.object({
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
   GROQ_API_KEY: z.string().optional(),
   GROQ_BASE_URL: z.string().default('https://api.groq.com/openai/v1'),
+  MINIO_ENDPOINT: z.string().default('localhost'),
+  MINIO_PORT: z.coerce.number().default(9000),
+  MINIO_ACCESS_KEY: z.string().default('minioadmin'),
+  MINIO_SECRET_KEY: z.string().default('minioadmin'),
+  MINIO_BUCKET: z.string().default('forgeai-documents'),
+  MINIO_USE_SSL: z.coerce.boolean().default(false),
 });
+
 
 const configResult = configSchema.safeParse(process.env);
 

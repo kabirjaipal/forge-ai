@@ -3,6 +3,11 @@ import fs from 'fs/promises';
 import prisma from '../lib/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { chunkText, generateEmbeddings } from './embeddingService.js';
+import {
+  getFileBufferFromStorage,
+  deleteFileFromStorage,
+  getPresignedUrlFromStorage,
+} from '../lib/storage.js';
 
 const ALLOWED_FILE_TYPES = ['pdf', 'docx', 'md', 'csv', 'txt'] as const;
 type FileType = (typeof ALLOWED_FILE_TYPES)[number];
@@ -144,11 +149,11 @@ export async function processDocumentAsync(documentId: string) {
     const doc = await prisma.document.findUnique({ where: { id: documentId } });
     if (!doc) return;
 
-    const filePath = path.join(process.cwd(), 'uploads', doc.fileKey);
     let rawText = '';
 
     try {
-      rawText = await fs.readFile(filePath, 'utf-8');
+      const buffer = await getFileBufferFromStorage(doc.fileKey);
+      rawText = buffer.toString('utf-8');
     } catch {
       rawText = `Document Name: ${doc.name}\nType: ${doc.fileType}`;
     }
@@ -212,12 +217,23 @@ export async function deleteDocument(id: string, workspaceId: string, userId: st
   if (!doc) throw new AppError('Document not found', 404, 'NOT_FOUND');
 
   try {
-    const filePath = path.join(process.cwd(), 'uploads', doc.fileKey);
-    await fs.unlink(filePath);
+    await deleteFileFromStorage(doc.fileKey);
   } catch {
-    // File may not exist locally
+    // Ignore storage delete error
   }
 
   await prisma.document.delete({ where: { id } });
   return { deleted: true };
+}
+
+export async function getDocumentDownloadUrl(id: string, workspaceId: string, userId: string): Promise<string> {
+  const member = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId },
+  });
+  if (!member) throw new AppError('Access denied', 403, 'FORBIDDEN');
+
+  const doc = await prisma.document.findFirst({ where: { id, workspaceId } });
+  if (!doc) throw new AppError('Document not found', 404, 'NOT_FOUND');
+
+  return await getPresignedUrlFromStorage(doc.fileKey);
 }
