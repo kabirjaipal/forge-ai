@@ -14,8 +14,6 @@ const configSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
-  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-  LOG_PRETTY: z.coerce.boolean().default(false),
   TRUST_PROXY: z.coerce.boolean().default(true),
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
   GROQ_API_KEY: z.string().optional(),
