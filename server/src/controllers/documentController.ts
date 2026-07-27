@@ -78,7 +78,7 @@ export const uploadDocument = (req: AuthRequest, res: Response) => {
       const ext = getExtension(req.file.originalname);
       const fileKey = `${uuidv4()}.${ext}`;
 
-      // Upload raw file buffer to MinIO (or fallback to local disk)
+      // Upload raw file buffer to S3
       await uploadFileToStorage(fileKey, req.file.buffer, req.file.mimetype);
 
       const doc = await createDocument({

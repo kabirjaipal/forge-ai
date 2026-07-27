@@ -18,7 +18,7 @@ const configSchema = z.object({
   REQUEST_BODY_LIMIT: z.string().default('10mb'),
   GROQ_API_KEY: z.string().optional(),
   GROQ_BASE_URL: z.string().default('https://api.groq.com/openai/v1'),
-  // S3 / Object Storage Configuration (Backblaze B2 / AWS S3 / MinIO)
+  // S3 / Object Storage Configuration (AWS S3)
   S3_ENDPOINT: z.string().default('https://s3.us-east-005.backblazeb2.com'),
   S3_REGION: z.string().default('us-east-005'),
   S3_ACCESS_KEY: z.string().default(''),

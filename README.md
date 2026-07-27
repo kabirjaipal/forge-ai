@@ -29,13 +29,13 @@
 * 🤖 **Autonomous AI Agents**: Custom system prompts, model controls (temperature, max tokens), and workspace knowledge isolation.
 * 🛠️ **Dynamic Tools & MCP**: Register REST APIs with JSON schema validation & native Model Context Protocol (`@modelcontextprotocol/sdk`) support.
 * 📊 **Structured Extraction**: Convert unstructured PDFs, resumes, and notes into strictly validated JSON payloads.
-* 🔐 **Multi-Tenant Auth & Storage**: Google & GitHub OAuth via **Better Auth** with S3/MinIO document storage.
+* 🔐 **Multi-Tenant Auth & Storage**: Google & GitHub OAuth via **Better Auth** with AWS S3 document storage.
 
 ---
 
 ## ⚡ Quick Start
 
-Launch the entire stack (Web App, API, Postgres+pgvector, Redis, MinIO) with Docker:
+Launch the entire stack (Web App, API, Postgres+pgvector, Redis) with Docker:
 
 ```bash
 # 1. Setup environment files
@@ -48,7 +48,6 @@ docker compose up --build
 
 * 🌐 **Web Interface**: [http://localhost:3000](http://localhost:3000)
 * 🔌 **API Server**: [http://localhost:3001](http://localhost:3001)
-* 📦 **MinIO Storage**: [http://localhost:9001](http://localhost:9001) (`minioadmin` / `minioadmin`)
 
 ---
 
@@ -56,7 +55,7 @@ docker compose up --build
 
 * **Frontend**: Next.js, React, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query
 * **Backend**: Node.js, Express, Prisma, Zod, Better Auth, Pino
-* **Data & Queue**: PostgreSQL (`pgvector`), Redis, BullMQ, MinIO S3 (`@aws-sdk/client-s3`)
+* **Data & Queue**: PostgreSQL (`pgvector`), Redis, BullMQ, AWS S3 (`@aws-sdk/client-s3`)
 * **AI Engine**: Groq API, HuggingFace Transformers, Model Context Protocol (`@modelcontextprotocol/sdk`)
 
 ---
