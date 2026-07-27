@@ -1,54 +1,78 @@
-# 🚀 ForgeAI
+<div align="center">
 
-> **AI Workspace for Document RAG, Autonomous Agents, Custom Tools & Data Extraction.**
+  <h1>🚀 ForgeAI</h1>
 
-[![Next.js 16](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
-[![Express 5](https://img.shields.io/badge/Express_5_TS-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![BullMQ v5](https://img.shields.io/badge/BullMQ_v5-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
-[![Better Auth](https://img.shields.io/badge/Better_Auth_v1.6-black?style=flat-square&logo=auth0&logoColor=white)](https://www.better-auth.com/)
-[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+  <p><b>Enterprise AI Workspace for Document RAG, Autonomous Agents, Custom Tools & Structured Data Extraction</b></p>
 
-ForgeAI is a full-stack, enterprise-grade AI platform that unifies **Document RAG Search**, **Custom AI Agents**, **Dynamic Tool Execution**, and **Structured Output Parsing** into a single workspace.
+  <p>
+    <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+    <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" /></a>
+    <a href="https://expressjs.com/"><img src="https://img.shields.io/badge/Express_TS-339933?style=flat-square&logo=nodedotjs&logoColor=white" alt="Express TS" /></a>
+    <a href="https://github.com/pgvector/pgvector"><img src="https://img.shields.io/badge/PostgreSQL_pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="pgvector" /></a>
+    <a href="https://redis.io/"><img src="https://img.shields.io/badge/BullMQ_Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="BullMQ" /></a>
+    <a href="https://www.better-auth.com/"><img src="https://img.shields.io/badge/Better_Auth-black?style=flat-square&logo=auth0&logoColor=white" alt="Better Auth" /></a>
+    <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+  </p>
+
+  ---
+</div>
+
+## 💡 Overview
+
+**ForgeAI** is a full-stack, enterprise-grade AI workspace unifying **Document RAG Search**, **Autonomous AI Agents**, **Dynamic Tool Execution (MCP & REST)**, and **Structured Data Extraction** into a single micro-decoupled platform.
 
 ---
 
-## 🔥 Key Features
+## ✨ Key Features
 
-* 📄 **Document RAG & Embeddings**: Asynchronous PDF/DOCX parsing via **BullMQ 5 + Redis**, stored in **pgvector** with streaming citations.
-* 🤖 **Autonomous AI Agents**: Custom system prompts, model controls, and dedicated knowledge bases.
-* 🛠️ **Dynamic Tool Calling & MCP**: Build custom REST API tools with **JSON Schema** validation & native Model Context Protocol (`@modelcontextprotocol/sdk`) support.
-* 📊 **Structured Data Extraction**: Parse invoices, resumes, and notes into validated JSON output.
-* 🔐 **Multi-Tenant Auth & Storage**: Google & GitHub OAuth via **Better Auth v1.6** with S3/MinIO object storage (`@aws-sdk/client-s3`).
+* 📄 **Document RAG & Embeddings**: Async PDF/DOCX chunking via **BullMQ + Redis**, vector search in **pgvector**, and streaming citations.
+* 🤖 **Autonomous AI Agents**: Custom system prompts, model controls (temperature, max tokens), and workspace knowledge isolation.
+* 🛠️ **Dynamic Tools & MCP**: Register REST APIs with JSON schema validation & native Model Context Protocol (`@modelcontextprotocol/sdk`) support.
+* 📊 **Structured Extraction**: Convert unstructured PDFs, resumes, and notes into strictly validated JSON payloads.
+* 🔐 **Multi-Tenant Auth & Storage**: Google & GitHub OAuth via **Better Auth** with S3/MinIO document storage.
 
 ---
 
 ## ⚡ Quick Start
 
-Launch the entire stack (Frontend, API, Postgres+pgvector, Redis, MinIO) in one command:
+Launch the entire stack (Web App, API, Postgres+pgvector, Redis, MinIO) with Docker:
 
 ```bash
+# 1. Setup environment files
 cp server/.env.example server/.env
 cp client/.env.example client/.env
 
-sudo docker compose up --build
+# 2. Start the full stack
+docker compose up --build
 ```
 
-* **Web App**: `http://localhost:3000`
-* **API Server**: `http://localhost:3001`
+* 🌐 **Web Interface**: [http://localhost:3000](http://localhost:3000)
+* 🔌 **API Server**: [http://localhost:3001](http://localhost:3001)
+* 📦 **MinIO Storage**: [http://localhost:9001](http://localhost:9001) (`minioadmin` / `minioadmin`)
 
 ---
 
 ## 🛠️ Tech Stack
 
-* **Frontend**: Next.js 16.2, React 19.2, TypeScript 5, Tailwind CSS 4, shadcn v4, TanStack Query v5
-* **Backend**: Node.js >=20, Express 5.2 (TypeScript), Prisma 6.4, Zod, Better Auth 1.6
-* **Data & Queue**: PostgreSQL (`pgvector`), Redis, BullMQ 5.41, MinIO S3 (`@aws-sdk/client-s3`)
-* **AI & DevOps**: Groq API, Model Context Protocol (`@modelcontextprotocol/sdk`), Docker Compose
+* **Frontend**: Next.js, React, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query
+* **Backend**: Node.js, Express, Prisma, Zod, Better Auth, Pino
+* **Data & Queue**: PostgreSQL (`pgvector`), Redis, BullMQ, MinIO S3 (`@aws-sdk/client-s3`)
+* **AI Engine**: Groq API, HuggingFace Transformers, Model Context Protocol (`@modelcontextprotocol/sdk`)
+
+---
+
+## 📂 Repository Structure
+
+```
+ForgeAI/
+├── client/          # Next.js Frontend (App Router, shadcn/ui, TanStack Query)
+├── server/          # Express TypeScript API (Prisma, BullMQ, Better Auth)
+├── docker-compose.yml
+└── README.md
+```
 
 ---
 
 <div align="center">
-Made by <b>Kabir Jaipal</b>
+  Crafted by <b>Kabir Jaipal</b> • Licensed under <b>MIT</b>
 </div>
