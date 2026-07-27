@@ -24,6 +24,10 @@ export function getRedisClient(): Redis {
   return redisInstance;
 }
 
+export function isRealRedisAvailable(): boolean {
+  return Boolean(config.REDIS_URL && config.REDIS_URL.trim() !== '');
+}
+
 export function checkRedisConnection(): boolean {
   return true;
 }

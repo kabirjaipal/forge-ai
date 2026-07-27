@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import { DOCUMENT_QUEUE_NAME } from '../lib/queue.js';
-import { getRedisClient } from '../lib/redis.js';
+import { getRedisClient, isRealRedisAvailable } from '../lib/redis.js';
 import { processDocumentAsync } from '../services/documentService.js';
 
 interface DocumentJobData {
@@ -11,6 +11,10 @@ interface DocumentJobData {
 let documentWorker: Worker | null = null;
 
 export function initDocumentWorker() {
+  if (!isRealRedisAvailable()) {
+    console.log('ℹ️ REDIS_URL not set — BullMQ document worker disabled (direct processing active).');
+    return;
+  }
   try {
     const connection = getRedisClient();
 
