@@ -15,7 +15,7 @@ export const auth = betterAuth({
     autoSignIn: true,
   },
   secret: config.BETTER_AUTH_SECRET,
-  baseURL: `http://${config.HOST === '0.0.0.0' ? 'localhost' : config.HOST}:${config.PORT}`,
+  baseURL: config.BETTER_AUTH_URL || `http://${config.HOST === '0.0.0.0' ? 'localhost' : config.HOST}:${config.PORT}`,
   trustedOrigins: origins.length > 0 ? origins : ['http://localhost:3000'],
   socialProviders: {
     ...(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET
@@ -37,7 +37,7 @@ export const auth = betterAuth({
   },
   advanced: {
     defaultCookieAttributes: {
-      sameSite: 'lax',
+      sameSite: config.NODE_ENV === 'production' ? 'none' : 'lax',
       secure: config.NODE_ENV === 'production',
     },
   },

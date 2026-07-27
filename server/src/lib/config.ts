@@ -10,6 +10,7 @@ const configSchema = z.object({
   DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/forgeai?schema=public'),
   REDIS_URL: z.string().optional(),
   BETTER_AUTH_SECRET: z.string().default('super-secret-key-forgeai-change-in-production'),
+  BETTER_AUTH_URL: z.string().optional(),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
