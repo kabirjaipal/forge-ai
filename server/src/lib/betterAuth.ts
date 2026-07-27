@@ -14,7 +14,7 @@ export const auth = betterAuth({
     enabled: true,
     autoSignIn: true,
   },
-  secret: config.JWT_SECRET,
+  secret: config.BETTER_AUTH_SECRET,
   baseURL: `http://${config.HOST === '0.0.0.0' ? 'localhost' : config.HOST}:${config.PORT}`,
   trustedOrigins: origins.length > 0 ? origins : ['http://localhost:3000'],
   socialProviders: {
