@@ -1,5 +1,7 @@
+import { Document } from '@langchain/core/documents';
+import { MemoryVectorStore } from '@langchain/classic/vectorstores/memory';
 import prisma from '../lib/prisma.js';
-import { generateEmbeddings, cosineSimilarity } from './embeddingService.js';
+import { createLangChainEmbeddings } from './embeddingService.js';
 
 export interface RAGMatch {
   documentId: string;
@@ -10,84 +12,109 @@ export interface RAGMatch {
 }
 
 /**
- * Searches for top-K document chunks across workspace or agent-linked documents
- * that are semantically relevant to the user query.
+ * Searches for top-K document chunks across agent-linked documents
+ * using LangChain MemoryVectorStore — eliminates manual cosine similarity loop.
+ * Chunks are loaded from DB, reconstructed as LangChain Documents, then
+ * similarity search is delegated entirely to LangChain.
  */
 export async function searchRelevantChunks(
-  workspaceId: string,
+  _workspaceId: string,
   query: string,
   agentId?: string,
   topK = 4,
 ): Promise<RAGMatch[]> {
-  if (!query || query.trim().length === 0) return [];
+  if (!query || query.trim().length === 0 || !agentId) return [];
 
-  // 1. Identify target document IDs
-  let documentIds: string[] = [];
-
-  if (agentId) {
-    const agentKnowledge = await prisma.agentKnowledge.findMany({
-      where: { agentId },
-      select: { documentId: true },
-    });
-    documentIds = agentKnowledge.map((ak) => ak.documentId);
-  }
-
-  // If no agent-specific docs, fallback to searching all completed documents in workspace
-  if (documentIds.length === 0) {
-    const workspaceDocs = await prisma.document.findMany({
-      where: { workspaceId, status: 'completed' },
-      select: { id: true },
-    });
-    documentIds = workspaceDocs.map((doc) => doc.id);
-  }
+  // 1. Identify document IDs linked to this agent
+  const agentKnowledge = await prisma.agentKnowledge.findMany({
+    where: { agentId },
+    select: { documentId: true },
+  });
+  const documentIds = agentKnowledge.map((ak) => ak.documentId);
 
   if (documentIds.length === 0) return [];
 
-  // 2. Generate embedding for user query
-  const [queryEmbedding] = await generateEmbeddings([query]);
-  if (!queryEmbedding) return [];
-
-  // 3. Fetch all chunks for target documents
+  // 2. Fetch all chunks for target agent documents
   const chunks = await prisma.documentChunk.findMany({
-    where: {
-      documentId: { in: documentIds },
-    },
-    include: {
-      document: {
-        select: { name: true },
-      },
-    },
+    where: { documentId: { in: documentIds } },
+    include: { document: { select: { name: true } } },
   });
 
   if (chunks.length === 0) return [];
 
-  // 4. Calculate similarity scores
-  const scoredMatches: RAGMatch[] = [];
+  // 3. Build LangChain Document objects with stored embeddings
+  const langchainDocs: Document[] = [];
+  const precomputedEmbeddings: number[][] = [];
+  const validChunks: typeof chunks = [];
 
   for (const chunk of chunks) {
     if (!chunk.embedding) continue;
 
-    let chunkVector: number[] = [];
+    let vector: number[] = [];
     try {
-      chunkVector = typeof chunk.embedding === 'string' ? JSON.parse(chunk.embedding) : chunk.embedding;
+      vector = typeof chunk.embedding === 'string'
+        ? JSON.parse(chunk.embedding)
+        : chunk.embedding;
     } catch {
       continue;
     }
 
-    const score = cosineSimilarity(queryEmbedding, chunkVector);
-    // Only include matches with positive similarity threshold
-    if (score > 0.05) {
-      scoredMatches.push({
-        documentId: chunk.documentId,
-        documentName: chunk.document.name,
-        chunkIndex: chunk.chunkIndex,
-        content: chunk.content,
-        score,
-      });
-    }
+    if (!Array.isArray(vector) || vector.length === 0) continue;
+
+    langchainDocs.push(
+      new Document({
+        pageContent: chunk.content,
+        metadata: {
+          documentId: chunk.documentId,
+          documentName: chunk.document.name,
+          chunkIndex: chunk.chunkIndex,
+        },
+      })
+    );
+    precomputedEmbeddings.push(vector);
+    validChunks.push(chunk);
   }
 
-  // 5. Sort by similarity score descending and take top K
-  scoredMatches.sort((a, b) => b.score - a.score);
-  return scoredMatches.slice(0, topK);
+  if (langchainDocs.length === 0) {
+    // Fallback: return top initial chunks if no embeddings are stored yet
+    return chunks.slice(0, topK).map((c) => ({
+      documentId: c.documentId,
+      documentName: c.document.name,
+      chunkIndex: c.chunkIndex,
+      content: c.content,
+      score: 1.0,
+    }));
+  }
+
+  // 4. Build MemoryVectorStore from pre-computed embeddings (no re-embedding needed)
+  const embeddings = createLangChainEmbeddings();
+  const vectorStore = await MemoryVectorStore.fromExistingIndex(embeddings);
+  await vectorStore.addVectors(precomputedEmbeddings, langchainDocs);
+
+  // 5. Similarity search via LangChain — cosine similarity handled internally
+  const results = await vectorStore.similaritySearchWithScore(query, topK);
+
+  // Filter noise and map to RAGMatch shape
+  const matches: RAGMatch[] = results
+    .filter(([, score]) => score > 0.05)
+    .map(([doc, score]) => ({
+      documentId: doc.metadata['documentId'] as string,
+      documentName: doc.metadata['documentName'] as string,
+      chunkIndex: doc.metadata['chunkIndex'] as number,
+      content: doc.pageContent,
+      score: Math.round(score * 1000) / 1000,
+    }));
+
+  // Fallback: if no chunks passed the threshold, return top-K initial chunks
+  if (matches.length === 0 && chunks.length > 0) {
+    return chunks.slice(0, topK).map((c) => ({
+      documentId: c.documentId,
+      documentName: c.document.name,
+      chunkIndex: c.chunkIndex,
+      content: c.content,
+      score: 1.0,
+    }));
+  }
+
+  return matches;
 }

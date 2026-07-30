@@ -10,6 +10,7 @@ import {
   deleteAgent,
   getTools,
 } from '../services/agentService.js';
+import { fetchAvailableModels } from '../services/groqService.js';
 
 const createAgentSchema = z.object({
   name: z.string().min(1, 'Agent name is required').max(100),
@@ -73,4 +74,10 @@ export const listTools = asyncHandler(async (req: AuthRequest, res: Response) =>
   const workspaceId = req.params['workspaceId'];
   const tools = await getTools(workspaceId);
   res.json({ success: true, data: tools });
+});
+
+export const listModelsHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  const models = await fetchAvailableModels();
+  res.json({ success: true, data: models });
 });

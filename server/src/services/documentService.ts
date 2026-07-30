@@ -1,9 +1,14 @@
 import { EventEmitter } from 'events';
 import path from 'path';
+import { createRequire } from 'module';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import prisma from '../lib/prisma.js';
 
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
 import { AppError } from '../middleware/errorHandler.js';
-import { chunkText, generateEmbeddings } from './embeddingService.js';
+import { generateEmbeddings } from './embeddingService.js';
 import {
   getFileBufferFromStorage,
   deleteFileFromStorage,
@@ -166,7 +171,16 @@ export async function processDocumentAsync(documentId: string) {
 
     try {
       const buffer = await getFileBufferFromStorage(doc.fileKey);
-      rawText = buffer.toString('utf-8');
+      if (doc.fileType.toLowerCase() === 'pdf') {
+        try {
+          const pdfData = await pdfParse(buffer);
+          rawText = pdfData.text || '';
+        } catch {
+          rawText = buffer.toString('utf-8');
+        }
+      } else {
+        rawText = buffer.toString('utf-8');
+      }
     } catch {
       rawText = `Document Name: ${doc.name}\nType: ${doc.fileType}`;
     }
@@ -188,8 +202,13 @@ export async function processDocumentAsync(documentId: string) {
       return;
     }
 
-    // 1. Chunk document text
-    const chunks = chunkText(extractedText, 500, 50);
+    // 1. Chunk document text using LangChain RecursiveCharacterTextSplitter
+    const textSplitter = new RecursiveCharacterTextSplitter({
+      chunkSize: 500,
+      chunkOverlap: 50,
+    });
+    const splitDocs = await textSplitter.createDocuments([extractedText]);
+    const chunks = splitDocs.map((doc, idx) => ({ index: idx, text: doc.pageContent }));
 
     if (chunks.length > 0) {
       // 2. Generate vector embeddings for chunks

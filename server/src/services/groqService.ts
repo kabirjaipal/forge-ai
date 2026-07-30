@@ -1,3 +1,6 @@
+import { ChatGroq } from '@langchain/groq';
+import { HumanMessage, SystemMessage, AIMessage, BaseMessage } from '@langchain/core/messages';
+
 export interface ChatMessageInput {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -5,7 +8,6 @@ export interface ChatMessageInput {
 
 export interface StreamGroqInput {
   systemPrompt?: string | undefined;
-  ragContext?: string | undefined;
   messages: ChatMessageInput[];
   model?: string | undefined;
   temperature?: number | undefined;
@@ -23,13 +25,32 @@ export interface StreamGroqOutput {
   usage: GroqUsage;
 }
 
-/**
- * Streams completion tokens from Groq API via SSE readable stream.
- * Default model: llama-3.3-70b-versatile
- */
-export async function streamGroqCompletion(input: StreamGroqInput): Promise<StreamGroqOutput> {
-  const { systemPrompt, ragContext, messages, model, temperature, onChunk } = input;
+export function extractTextContent(content: unknown): string {
+  if (!content) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item !== null) {
+          const obj = item as Record<string, any>;
+          return obj['text'] || obj['content'] || '';
+        }
+        return '';
+      })
+      .join('');
+  }
+  if (typeof content === 'object' && content !== null) {
+    const obj = content as Record<string, any>;
+    return obj['text'] || obj['content'] || '';
+  }
+  return '';
+}
 
+/**
+ * Creates an instance of ChatGroq using @langchain/groq.
+ */
+export function createChatGroqModel(modelName?: string, temperature?: number): ChatGroq {
   const apiKey = process.env['GROQ_API_KEY'];
   const isRealApiKey = apiKey && apiKey.startsWith('gsk_') && !apiKey.includes('your_groq_api_key_here');
 
@@ -37,92 +58,67 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<Stre
     throw new Error('Groq API key is missing or invalid in server/.env. Please configure a valid GROQ_API_KEY.');
   }
 
-  // 1. Construct system prompt & RAG context
-  let finalSystemPrompt = systemPrompt?.trim() || 'You are an intelligent, helpful AI assistant built on ForgeAI.';
-  if (ragContext && ragContext.trim().length > 0) {
-    finalSystemPrompt += `\n\n--- RETRIEVED KNOWLEDGE BASE CONTEXT ---\n${ragContext.trim()}\n--- END CONTEXT ---`;
+  let baseUrl = process.env['GROQ_BASE_URL'];
+  if (baseUrl) {
+    baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/openai\/v1$/i, '');
+    if (baseUrl === 'https://api.groq.com') {
+      baseUrl = undefined;
+    }
   }
 
-  const formattedMessages: ChatMessageInput[] = [
-    { role: 'system', content: finalSystemPrompt },
-    ...messages,
+  if (!modelName) {
+    throw new Error('No AI model specified. Please select a valid model.');
+  }
+
+  return new ChatGroq({
+    apiKey,
+    model: modelName,
+    temperature: typeof temperature === 'number' ? temperature : 0.7,
+    ...(baseUrl ? { baseUrl } : {}),
+  });
+}
+
+/**
+ * Streams completion tokens using LangChain's ChatGroq and supports LangSmith tracing automatically.
+ * Default model: llama-3.3-70b-versatile
+ */
+export async function streamGroqCompletion(input: StreamGroqInput): Promise<StreamGroqOutput> {
+  const { systemPrompt, messages, model, temperature, onChunk } = input;
+
+  const chatModel = createChatGroqModel(model, temperature);
+
+  // RAG context is pre-embedded into systemPrompt by the caller before invoking this function.
+  const finalSystemPrompt = systemPrompt?.trim() || 'You are an intelligent, helpful AI assistant built on ForgeAI.';
+
+  const langchainMessages: BaseMessage[] = [
+    new SystemMessage(finalSystemPrompt),
+    ...messages.map((m) => {
+      if (m.role === 'user') return new HumanMessage(m.content);
+      if (m.role === 'assistant') return new AIMessage(m.content);
+      return new SystemMessage(m.content);
+    }),
   ];
 
-  const targetModel = model || 'llama-3.3-70b-versatile';
-  const targetTemp = typeof temperature === 'number' ? temperature : 0.7;
-
-  const baseUrl = (process.env['GROQ_BASE_URL'] || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
-
-  // 2. Call Groq OpenAI-compatible Chat Completions endpoint with stream: true & include_usage: true
-  const response = await globalThis.fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: targetModel,
-      messages: formattedMessages,
-      temperature: targetTemp,
-      stream: true,
-      stream_options: { include_usage: true },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Groq API returned status ${response.status}: ${errorBody}`);
-  }
-
-  if (!response.body) {
-    throw new Error('Groq API response body is empty');
-  }
-
-  // 3. Read SSE stream
   let accumulatedText = '';
-  let usage: GroqUsage | null = null;
-  const reader = response.body.getReader();
-  const decoder = new globalThis.TextDecoder('utf-8');
-  let buffer = '';
+  let usage: GroqUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  // 2. Stream using LangChain ChatGroq stream API
+  const stream = await chatModel.stream(langchainMessages);
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith(':')) continue;
-      if (trimmed === 'data: [DONE]') break;
-
-      if (trimmed.startsWith('data: ')) {
-        try {
-          const jsonStr = trimmed.slice(6);
-          const parsed = JSON.parse(jsonStr) as {
-            choices?: Array<{ delta?: { content?: string } }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-          };
-
-          if (parsed.usage) {
-            usage = {
-              promptTokens: parsed.usage.prompt_tokens || 0,
-              completionTokens: parsed.usage.completion_tokens || 0,
-              totalTokens: parsed.usage.total_tokens || 0,
-            };
-          }
-
-          const deltaContent = parsed.choices?.[0]?.delta?.content;
-          if (deltaContent) {
-            accumulatedText += deltaContent;
-            await onChunk(deltaContent);
-          }
-        } catch {
-          // Skip invalid JSON lines
-        }
-      }
+  for await (const chunk of stream) {
+    const textChunk = extractTextContent(chunk.content);
+    if (textChunk) {
+      accumulatedText += textChunk;
+      await onChunk(textChunk);
+    }
+    const meta = chunk.response_metadata as Record<string, any> | undefined;
+    if (meta && meta['tokenUsage']) {
+      const tu = meta['tokenUsage'];
+      usage = {
+        promptTokens: tu.promptTokens || tu.prompt_tokens || 0,
+        completionTokens: tu.completionTokens || tu.completion_tokens || 0,
+        totalTokens: tu.totalTokens || tu.total_tokens || 0,
+      };
     }
   }
 
@@ -132,6 +128,85 @@ export async function streamGroqCompletion(input: StreamGroqInput): Promise<Stre
 
   return {
     text: accumulatedText,
-    usage: usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    usage,
   };
 }
+
+export async function fetchAvailableModels(): Promise<Array<{ id: string; name: string; contextWindow: number; isActive: boolean }>> {
+  const apiKey = process.env['GROQ_API_KEY'];
+  let baseUrl = process.env['GROQ_BASE_URL'] || 'https://api.groq.com';
+  baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/openai\/v1$/i, '');
+
+  const isRealApiKey = apiKey && apiKey.startsWith('gsk_') && !apiKey.includes('your_groq_api_key_here');
+
+  if (!isRealApiKey) {
+    throw new Error('Groq API key is missing or invalid in server/.env. Please configure a valid GROQ_API_KEY.');
+  }
+
+  const res = await globalThis.fetch(`${baseUrl}/openai/v1/models`, {
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to fetch live models from provider API (${res.status}): ${errText}`);
+  }
+
+  const data = (await res.json()) as { data?: Array<{ id: string; context_window?: number; active?: boolean }> };
+  if (!data?.data || data.data.length === 0) {
+    return [];
+  }
+
+  return data.data
+    .filter((m) => !m.id.includes('whisper') && !m.id.includes('safetensors'))
+    .map((m) => ({
+      id: m.id,
+      name: m.id.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+      contextWindow: m.context_window || 128000,
+      isActive: m.active !== false,
+    }));
+}
+
+/**
+ * Uses LLM to intelligently generate 2-3 search query variations for Multi-Query Web Expansion.
+ */
+export async function generateExpandedSearchQueries(userQuery: string): Promise<string[]> {
+  const clean = userQuery
+    .replace(/^@\w+\s*/, '')
+    .replace(/@\w+/g, '')
+    .replace(/^(?:search online for|search web for|search for|google|find)\s*/i, '')
+    .trim();
+  if (!clean) return [userQuery];
+
+  try {
+    const chatModel = createChatGroqModel('llama-3.1-8b-instant', 0.2);
+    const systemInstruction = new SystemMessage(
+      `You are an AI Search Query Optimizer. Generate 3 distinct, targeted search queries for Google to find comprehensive results for the user's intent. Output strictly a raw JSON array of strings without markdown formatting. Example: ["query 1", "query 2", "query 3"]`
+    );
+    const userMsg = new HumanMessage(clean);
+
+    const response = await chatModel.invoke([systemInstruction, userMsg]);
+    const responseText = extractTextContent(response.content).trim();
+
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const expanded = parsed.map((q: any) => String(q).trim()).filter(Boolean);
+        if (!expanded.includes(clean)) {
+          expanded.unshift(clean);
+        }
+        return expanded;
+      }
+    }
+    console.warn(`[QueryExpansion] Could not parse JSON array from LLM response.`);
+  } catch (err) {
+    console.error('[QueryExpansion] Query expansion error:', err);
+  }
+
+  return [clean];
+}
+

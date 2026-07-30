@@ -7,6 +7,7 @@ import {
   updateAgentHandler,
   deleteAgentHandler,
   listTools,
+  listModelsHandler,
 } from '../controllers/agentController.js';
 
 const router = Router({ mergeParams: true });
@@ -14,6 +15,7 @@ const router = Router({ mergeParams: true });
 router.get('/', authenticate, listAgents);
 router.post('/', authenticate, createAgentHandler);
 router.get('/tools', authenticate, listTools);
+router.get('/models', authenticate, listModelsHandler);
 router.get('/:id', authenticate, getAgent);
 router.put('/:id', authenticate, updateAgentHandler);
 router.delete('/:id', authenticate, deleteAgentHandler);

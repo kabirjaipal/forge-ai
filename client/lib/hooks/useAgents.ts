@@ -34,10 +34,26 @@ export interface CreateAgentInput {
   toolIds?: string[];
 }
 
+export interface ModelOption {
+  id: string;
+  name: string;
+  contextWindow: number;
+  isActive: boolean;
+}
+
 export function useAgents(workspaceId: string | undefined) {
   return useQuery({
     queryKey: ['agents', workspaceId],
     queryFn: () => api.get<Agent[]>(`/workspaces/${workspaceId}/agents`),
+    enabled: !!workspaceId,
+    select: (res) => res.data ?? [],
+  });
+}
+
+export function useModels(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: ['models', workspaceId],
+    queryFn: () => api.get<ModelOption[]>(`/workspaces/${workspaceId}/agents/models`),
     enabled: !!workspaceId,
     select: (res) => res.data ?? [],
   });

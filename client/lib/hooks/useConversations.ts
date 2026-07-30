@@ -66,11 +66,33 @@ export function useCreateConversation(workspaceId: string | undefined) {
   });
 }
 
+export function useUpdateConversation(workspaceId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
+      api.patch<Conversation>(`/workspaces/${workspaceId}/conversations/${id}`, { title }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ['conversation', workspaceId, variables.id] });
+    },
+  });
+}
+
 export function useDeleteConversation(workspaceId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       api.delete(`/workspaces/${workspaceId}/conversations/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
+    },
+  });
+}
+
+export function useDeleteAllConversations(workspaceId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`/workspaces/${workspaceId}/conversations`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId] });
     },

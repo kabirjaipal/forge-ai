@@ -65,6 +65,18 @@ export async function createConversation(workspaceId: string, userId: string, ti
   });
 }
 
+export async function updateConversationTitle(id: string, workspaceId: string, userId: string, title: string) {
+  await assertWorkspaceMember(workspaceId, userId);
+
+  const convo = await prisma.conversation.findFirst({ where: { id, workspaceId } });
+  if (!convo) throw new AppError('Conversation not found', 404, 'NOT_FOUND');
+
+  return prisma.conversation.update({
+    where: { id },
+    data: { title: title.trim() },
+  });
+}
+
 export async function deleteConversation(id: string, workspaceId: string, userId: string) {
   await assertWorkspaceMember(workspaceId, userId);
 
@@ -73,6 +85,13 @@ export async function deleteConversation(id: string, workspaceId: string, userId
 
   await prisma.conversation.delete({ where: { id } });
   return { deleted: true };
+}
+
+export async function deleteAllConversations(workspaceId: string, userId: string) {
+  await assertWorkspaceMember(workspaceId, userId);
+
+  await prisma.conversation.deleteMany({ where: { workspaceId } });
+  return { deletedAll: true };
 }
 
 export async function addMessage(

@@ -16,6 +16,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import {
   useAgents,
+  useModels,
   useTools,
   useCreateAgent,
   useDeleteAgent,
@@ -45,12 +46,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 
-const MODEL_OPTIONS = [
-  { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B (Groq Fast)' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-];
-
 function AgentFormModal({
   agent,
   workspaceId,
@@ -62,6 +57,7 @@ function AgentFormModal({
 }) {
   const { data: docs } = useDocuments(workspaceId);
   const { data: tools } = useTools(workspaceId);
+  const { data: liveModels = [] } = useModels(workspaceId);
   const createAgent = useCreateAgent(workspaceId);
   const updateAgent = useUpdateAgent(workspaceId);
 
@@ -82,16 +78,13 @@ function AgentFormModal({
     setError(null);
     try {
       if (agent) {
-        const result = await updateAgent.mutateAsync({ id: agent.id, data: form });
-        if (!result.success) setError(result.error?.message || 'Update failed');
-        else onClose();
+        await updateAgent.mutateAsync({ id: agent.id, data: form });
       } else {
-        const result = await createAgent.mutateAsync(form);
-        if (!result.success) setError(result.error?.message || 'Create failed');
-        else onClose();
+        await createAgent.mutateAsync(form);
       }
+      onClose();
     } catch (err: any) {
-      setError(err.message || 'An error occurred');
+      setError(err?.response?.data?.error?.message || 'Failed to save agent');
     }
   };
 
@@ -139,7 +132,7 @@ function AgentFormModal({
               <Input
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. Research Assistant"
+                placeholder="e.g. Resume Talker, Code Reviewer..."
                 required
                 className="bg-background border-border h-9 rounded-xl text-xs"
               />
@@ -165,9 +158,9 @@ function AgentFormModal({
                   <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {MODEL_OPTIONS.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
+                  {liveModels.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      ⚡ {m.name} ({m.contextWindow.toLocaleString()} ctx)
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -320,7 +313,7 @@ export default function AgentsPage() {
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-border/60">
-                <Link href="/dashboard/chat">
+                <Link href={`/dashboard/chat?agentId=${agent.id}`}>
                   <Button variant="outline" size="sm" className="h-7 text-xs rounded-lg font-medium">
                     Start Chat
                   </Button>

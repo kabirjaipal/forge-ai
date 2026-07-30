@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   MessageSquare,
   Send,
   Plus,
   Trash2,
+  Pencil,
   Bot,
   User,
   Sparkles,
@@ -13,14 +15,9 @@ import {
   X,
   AlertCircle,
   Search,
-  Code2,
-  BookOpen,
-  Zap,
-  BarChart3,
   Copy,
   Check,
   RotateCcw,
-  ArrowUpRight,
   Cpu,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -29,7 +26,9 @@ import { useAuth } from '@/lib/auth-context';
 import {
   useConversations,
   useCreateConversation,
+  useUpdateConversation,
   useDeleteConversation,
+  useDeleteAllConversations,
   useConversation,
   type Message,
 } from '@/lib/hooks/useConversations';
@@ -48,39 +47,6 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/lib/api';
-
-const QUICK_STARTERS = [
-  {
-    icon: Code2,
-    title: 'Code Refactoring',
-    prompt: 'Review my codebase architecture and suggest clean optimizations.',
-    badge: 'Code AI',
-  },
-  {
-    icon: BookOpen,
-    title: 'Knowledge Query',
-    prompt: 'Summarize key findings from the uploaded workspace documents.',
-    badge: 'RAG Search',
-  },
-  {
-    icon: Zap,
-    title: 'Multi-Tool Search',
-    prompt: 'Query live web data, weather info, and database metrics using agent tools.',
-    badge: 'Tools',
-  },
-  {
-    icon: BarChart3,
-    title: 'Analytics Insights',
-    prompt: 'Analyze workspace performance metrics and document trends.',
-    badge: 'Analytics',
-  },
-];
-
-const ALL_TOOLS = [
-  { tag: '@web_search', name: 'Web Search', description: 'Live Search Engine', icon: '🌐' },
-  { tag: '@weather_api', name: 'Weather API', description: 'Real-time Live Weather & Forecast', icon: '☀️' },
-];
-
 
 function MessageBubble({
   message,
@@ -122,7 +88,7 @@ function MessageBubble({
           )}
         </div>
         <div
-          className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+          className={`relative px-4 py-3 pr-8 rounded-2xl text-sm leading-relaxed ${
             isUser
               ? 'bg-primary text-primary-foreground rounded-tr-xs shadow-xs'
               : 'bg-background text-foreground border border-border/80 rounded-tl-xs shadow-xs'
@@ -184,15 +150,21 @@ function MessageBubble({
             </div>
           )}
 
-          {!isUser && (
-            <button
-              onClick={handleCopy}
-              className="absolute top-2.5 right-2.5 p-1 rounded-md bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-              title="Copy message"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          )}
+          <button
+            onClick={handleCopy}
+            className={`absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-xs ${
+              isUser
+                ? 'bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30'
+                : 'bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 border border-border/60'
+            }`}
+            title={isUser ? 'Copy prompt' : 'Copy message'}
+          >
+            {copied ? (
+              <Check className={`w-3.5 h-3.5 ${isUser ? 'text-primary-foreground font-bold' : 'text-success'}`} />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -202,14 +174,21 @@ function MessageBubble({
 export default function ChatPage() {
   const { currentWorkspace } = useAuth();
   const workspaceId = currentWorkspace?.id;
+  const searchParams = useSearchParams();
+  const urlAgentId = searchParams.get('agentId');
 
   const { data: conversations } = useConversations(workspaceId);
   const { data: agents } = useAgents(workspaceId);
   const createConvo = useCreateConversation(workspaceId);
+  const updateConvo = useUpdateConversation(workspaceId);
   const deleteConvo = useDeleteConversation(workspaceId);
+  const deleteAllConvos = useDeleteAllConversations(workspaceId);
   const queryClient = useQueryClient();
 
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
+  const [editingConvoId, setEditingConvoId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [localMessages, setLocalMessages] = useState<
     (Message | { id: string; role: string; content: string; createdAt?: string })[]
   >([]);
@@ -217,12 +196,43 @@ export default function ChatPage() {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showNewConvo, setShowNewConvo] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [selectedAgentId, setSelectedAgentId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'agents'>('all');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const router = useRouter();
+  const processedAgentIdRef = useRef<string | null>(null);
+
+  // Auto-start chat with agent when URL contains ?agentId=... (guaranteed single execution)
+  useEffect(() => {
+    if (
+      urlAgentId &&
+      workspaceId &&
+      agents &&
+      conversations &&
+      processedAgentIdRef.current !== urlAgentId
+    ) {
+      processedAgentIdRef.current = urlAgentId;
+      const targetAgent = agents.find((a) => a.id === urlAgentId);
+      if (targetAgent) {
+        const existing = conversations.find((c) => c.agentId === urlAgentId);
+        if (existing) {
+          setActiveConvoId(existing.id);
+          router.replace('/dashboard/chat');
+        } else {
+          createConvo.mutateAsync({
+            title: `Chat with ${targetAgent.name}`,
+            agentId: urlAgentId,
+          }).then((res) => {
+            if (res.success && res.data) {
+              setActiveConvoId(res.data.id);
+            }
+            router.replace('/dashboard/chat');
+          });
+        }
+      }
+    }
+  }, [urlAgentId, workspaceId, agents, conversations, router]);
 
   const [showToolSuggestions, setShowToolSuggestions] = useState(false);
   const [toolSearchQuery, setToolSearchQuery] = useState('');
@@ -322,26 +332,24 @@ export default function ChatPage() {
   }, [conversations, searchQuery, filterType]);
 
   const handleCreateConvo = async (customTitle?: string, customAgentId?: string) => {
-    const titleToUse = customTitle || newTitle.trim();
-    if (!titleToUse || !workspaceId) return;
+    if (!workspaceId) return;
+    const titleToUse = customTitle || 'New Chat';
 
     const result = await createConvo.mutateAsync({
       title: titleToUse,
-      agentId: customAgentId || selectedAgentId || undefined,
+      agentId: customAgentId || undefined,
     });
     if (result.success && result.data) {
       setActiveConvoId(result.data.id);
       setLocalMessages([]);
     }
-    setNewTitle('');
-    setSelectedAgentId('');
-    setShowNewConvo(false);
   };
 
-  const handleQuickStarter = (starter: (typeof QUICK_STARTERS)[0]) => {
-    const agentToUse = agents && agents.length > 0 ? agents[0].id : undefined;
-    handleCreateConvo(starter.title, agentToUse);
-    setInputText(starter.prompt);
+  const handleSaveRename = (id: string) => {
+    if (editingTitle.trim()) {
+      updateConvo.mutate({ id, title: editingTitle.trim() });
+    }
+    setEditingConvoId(null);
   };
 
   const [activeToolStatus, setActiveToolStatus] = useState<{ toolName: string; message: string; isComplete: boolean } | null>(null);
@@ -463,14 +471,46 @@ export default function ChatPage() {
       <aside className="w-full md:w-80 bg-background border-r border-border flex flex-col shrink-0 min-h-0 overflow-hidden">
         {/* Header & New Button */}
         <div className="p-3.5 border-b border-border space-y-3">
-          <Button
-            variant="primary"
-            size="default"
-            className="w-full justify-center rounded-xl font-semibold shadow-xs"
-            onClick={() => setShowNewConvo(true)}
-          >
-            <Plus className="w-4 h-4" /> New Conversation
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="primary"
+              size="default"
+              className="flex-1 justify-center rounded-xl font-semibold shadow-xs"
+              onClick={() => handleCreateConvo('New Chat')}
+            >
+              <Plus className="w-4 h-4" /> New Chat
+            </Button>
+            {agents && agents.length > 0 && (
+              <Select
+                value={activeConvo?.agentId || 'none'}
+                onValueChange={(val) => {
+                  if (val && val !== 'none') {
+                    const agent = agents.find((a) => a.id === val);
+                    handleCreateConvo(agent ? `Chat with ${agent.name}` : 'New Chat', val);
+                  } else if (val === 'none') {
+                    handleCreateConvo('New Chat');
+                  }
+                }}
+              >
+                <SelectTrigger className="w-28 h-9 rounded-xl bg-background border-border text-xs shrink-0 font-medium">
+                  <SelectValue placeholder="Agent 🤖">
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Bot className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span>Agent</span>
+                    </span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="none">✨ General AI (No Agent)</SelectItem>
+                  {agents.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      🤖 {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
 
           {/* Search input */}
           <div className="relative">
@@ -483,72 +523,58 @@ export default function ChatPage() {
             />
           </div>
 
-          {/* Filter Tabs using Official Shadcn UI Component with Bootstrap Button Group style */}
-          <Tabs value={filterType} onValueChange={(val) => setFilterType(val as 'all' | 'agents')} className="w-full">
-            <TabsList variant="buttonGroup" className="w-full grid grid-cols-2 h-8">
-              <TabsTrigger value="all">
-                All ({conversations?.length || 0})
-              </TabsTrigger>
-              <TabsTrigger value="agents">
-                Agents Only
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
+          {/* Filter Tabs & Delete All Button */}
+          <div className="flex items-center justify-between gap-2">
+            <Tabs value={filterType} onValueChange={(val) => setFilterType(val as 'all' | 'agents')} className="flex-1 min-w-0">
+              <TabsList variant="buttonGroup" className="w-full grid grid-cols-2 h-8">
+                <TabsTrigger value="all">
+                  All ({conversations?.length || 0})
+                </TabsTrigger>
+                <TabsTrigger value="agents">
+                  Agents Only
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-        {/* New Conversation Form */}
-        {showNewConvo && (
-          <div className="p-4 border-b border-border bg-muted/30 space-y-3">
-            <Input
-              autoFocus
-              placeholder="Conversation title..."
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateConvo()}
-              className="bg-background border-border h-9 rounded-xl text-xs"
-            />
-            {agents && agents.length > 0 && (
-              <Select
-                value={selectedAgentId || 'none'}
-                onValueChange={(val) => setSelectedAgentId(val && val !== 'none' ? val : '')}
-              >
-                <SelectTrigger className="w-full h-9 rounded-xl bg-background border-border text-xs">
-                  <SelectValue placeholder="Select agent (optional)">
-                    {agents.find((a) => a.id === selectedAgentId)?.name ||
-                      (selectedAgentId === 'none' ? 'No agent (general chat)' : null)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No agent (general chat)</SelectItem>
-                  {agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {conversations && conversations.length > 0 && (
+              confirmDeleteAll ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      deleteAllConvos.mutate();
+                      setActiveConvoId(null);
+                      setConfirmDeleteAll(false);
+                    }}
+                    title="Confirm Delete All Chats"
+                    className="h-8 px-2 text-[11px] font-bold rounded-lg"
+                  >
+                    Clear All
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="outline"
+                    onClick={() => setConfirmDeleteAll(false)}
+                    className="h-8 w-6 p-0 rounded-lg"
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setConfirmDeleteAll(true)}
+                  className="h-8 w-8 text-muted-foreground hover:text-danger hover:bg-danger/10 rounded-lg shrink-0"
+                  title="Delete all conversations"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              )
             )}
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="primary"
-                className="flex-1 rounded-xl"
-                onClick={() => handleCreateConvo()}
-                disabled={!newTitle.trim() || createConvo.isPending}
-              >
-                {createConvo.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => setShowNewConvo(false)}
-              >
-                <X className="w-3.5 h-3.5" />
-              </Button>
-            </div>
           </div>
-        )}
+        </div>
 
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -586,35 +612,80 @@ export default function ChatPage() {
                     >
                       {convo.agent ? <Bot className="w-3.5 h-3.5" /> : <MessageSquare className="w-3.5 h-3.5" />}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-xs truncate ${isActive ? 'font-bold text-primary' : 'font-medium text-foreground'}`}>
-                        {convo.title}
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        {convo.agent && (
-                          <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.2 rounded font-medium truncate">
-                            {convo.agent.name}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-muted-foreground">
-                          {convo._count?.messages || 0} msgs
-                        </span>
+                    {editingConvoId === convo.id ? (
+                      <div className="flex items-center gap-1 min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          autoFocus
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(convo.id);
+                            if (e.key === 'Escape') setEditingConvoId(null);
+                          }}
+                          className="h-7 text-xs bg-background rounded-lg"
+                        />
+                        <button
+                          onClick={() => handleSaveRename(convo.id)}
+                          className="p-1 text-success hover:bg-success/10 rounded"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditingConvoId(null)}
+                          className="p-1 text-muted-foreground hover:bg-muted rounded"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-xs truncate ${isActive ? 'font-bold text-primary' : 'font-medium text-foreground'}`}>
+                          {convo.title}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {convo.agent && (
+                            <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.2 rounded font-medium truncate">
+                              {convo.agent.name}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground">
+                            {convo._count?.messages || 0} msgs
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteConvo.mutate(convo.id);
-                      if (activeConvoId === convo.id) setActiveConvoId(null);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-danger hover:bg-danger/10 transition-all rounded-lg"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  {editingConvoId !== convo.id && (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingConvoId(convo.id);
+                          setEditingTitle(convo.title);
+                        }}
+                        className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg"
+                        title="Rename chat"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteConvo.mutate(convo.id);
+                          if (activeConvoId === convo.id) setActiveConvoId(null);
+                        }}
+                        className="text-muted-foreground hover:text-danger hover:bg-danger/10 rounded-lg"
+                        title="Delete chat"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -640,49 +711,14 @@ export default function ChatPage() {
                 </p>
               </div>
 
-              {/* Starter Prompt Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left pt-2">
-                {QUICK_STARTERS.map((starter, i) => {
-                  const IconComp = starter.icon;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => handleQuickStarter(starter)}
-                      className="p-4 rounded-2xl border border-border/80 bg-background hover:border-primary/40 hover:bg-muted/30 transition-all text-left group cursor-pointer shadow-xs flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                            <IconComp className="w-4 h-4" />
-                          </div>
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                            {starter.badge}
-                          </span>
-                        </div>
-                        <h4 className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
-                          {starter.title}
-                        </h4>
-                        <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-normal">
-                          {starter.prompt}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px] text-primary font-semibold mt-3 opacity-0 group-hover:opacity-100 transition-all">
-                        <span>Start Chat</span>
-                        <ArrowUpRight className="w-3 h-3" />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="pt-2">
+              <div className="pt-4">
                 <Button
                   variant="primary"
                   size="default"
-                  className="rounded-xl font-semibold shadow-xs"
-                  onClick={() => setShowNewConvo(true)}
+                  className="rounded-xl font-semibold shadow-xs px-6"
+                  onClick={() => handleCreateConvo('New Chat')}
                 >
-                  <Plus className="w-4 h-4" /> Start Custom Conversation
+                  <Plus className="w-4 h-4" /> Start New Conversation
                 </Button>
               </div>
             </div>
@@ -700,9 +736,50 @@ export default function ChatPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-foreground text-sm tracking-tight">
-                      {activeConvo?.title || 'Conversation'}
-                    </h3>
+                    {activeConvo && editingConvoId === activeConvo.id ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          autoFocus
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(activeConvo.id);
+                            if (e.key === 'Escape') setEditingConvoId(null);
+                          }}
+                          className="h-7 text-xs bg-background rounded-lg font-bold"
+                        />
+                        <button
+                          onClick={() => handleSaveRename(activeConvo.id)}
+                          className="p-1 text-success hover:bg-success/10 rounded"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditingConvoId(null)}
+                          className="p-1 text-muted-foreground hover:bg-muted rounded"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <h3 className="font-bold text-foreground text-sm tracking-tight">
+                          {activeConvo?.title || 'Conversation'}
+                        </h3>
+                        {activeConvo && (
+                          <button
+                            onClick={() => {
+                              setEditingConvoId(activeConvo.id);
+                              setEditingTitle(activeConvo.title);
+                            }}
+                            className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-all"
+                            title="Rename conversation"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        )}
+                      </>
+                    )}
                     {activeConvo?.agent && (
                       <span className="text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
                         {activeConvo.agent.name}

@@ -6,18 +6,22 @@ import {
   getConversations,
   getConversationById,
   createConversation,
+  updateConversationTitle,
   deleteConversation,
+  deleteAllConversations,
   addMessage,
   getAnalytics,
 } from '../services/conversationService.js';
 import { searchRelevantChunks } from '../services/ragService.js';
-import { streamGroqCompletion } from '../services/groqService.js';
-import { executeTool } from '../services/toolService.js';
-import prisma from '../lib/prisma.js';
+import { runPureLangChainToolAgentStream } from '../services/langgraphService.js';
 
 const createConvoSchema = z.object({
   title: z.string().min(1).max(200),
   agentId: z.string().optional(),
+});
+
+const updateConvoSchema = z.object({
+  title: z.string().min(1).max(200),
 });
 
 const addMessageSchema = z.object({
@@ -52,11 +56,29 @@ export const createConversationHandler = asyncHandler(async (req: AuthRequest, r
   res.status(201).json({ success: true, data: convo });
 });
 
+export const updateConversationHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  const { workspaceId, id } = req.params as { workspaceId: string; id: string };
+  const parsed = updateConvoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError(parsed.error.issues[0]?.message || 'Validation failed', 400, 'VALIDATION_ERROR');
+  }
+  const updated = await updateConversationTitle(id, workspaceId, req.user.id, parsed.data.title);
+  res.json({ success: true, data: updated });
+});
+
 export const deleteConversationHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
   const { workspaceId, id } = req.params as { workspaceId: string; id: string };
   await deleteConversation(id, workspaceId, req.user.id);
   res.json({ success: true, data: { deleted: true } });
+});
+
+export const deleteAllConversationsHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
+  if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  const workspaceId = req.params['workspaceId']!;
+  await deleteAllConversations(workspaceId, req.user.id);
+  res.json({ success: true, data: { deletedAll: true } });
 });
 
 export const addMessageHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -87,23 +109,32 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
   const { workspaceId, id } = req.params as { workspaceId: string; id: string };
   const { content } = req.body as { content: string };
 
-  if (!content?.trim()) {
-    res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Message content is required' } });
-    return;
-  }
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as any).flush === 'function') {
+      (res as any).flush();
+    }
+  };
 
   try {
-    // 1. Fetch conversation details to check attached agent and message history
+    // 1. Fetch conversation & attached agent details
     const conversation = await getConversationById(id, workspaceId, req.user.id);
     const agentId = conversation.agentId || undefined;
 
-    // 2. Store user message in database
+    // Auto-generate title from first user message if still default
+    if (conversation.title === 'New Chat' || conversation.title === 'New Conversation') {
+      const generatedTitle = content.trim().replace(/\n/g, ' ').slice(0, 35).trim() + (content.length > 35 ? '...' : '');
+      if (generatedTitle) {
+        await updateConversationTitle(id, workspaceId, req.user.id, generatedTitle);
+      }
+    }
+
+    // 2. Store user message
     await addMessage(id, workspaceId, req.user.id, 'user', content);
 
-    // 3. Perform RAG Vector Similarity Search across workspace/agent document chunks
+    // 3. RAG: vector similarity search over agent-linked document chunks
     const ragMatches = await searchRelevantChunks(workspaceId, content, agentId, 4);
 
-    let ragContextString = '';
     const citations = ragMatches.map((match) => ({
       documentId: match.documentId,
       documentName: match.documentName,
@@ -111,13 +142,14 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       relevanceScore: Math.round(match.score * 100) / 100,
     }));
 
+    let ragContextString = '';
     if (ragMatches.length > 0) {
       ragContextString = ragMatches
-        .map((m, idx) => `[Source ${idx + 1}: ${m.documentName}]\n${m.content}`)
+        .map((m, idx) => `[Document: "${m.documentName}" | Excerpt ${idx + 1}]\n${m.content}`)
         .join('\n\n');
     }
 
-    // Set up SSE headers for real-time streaming response
+    // Set SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -125,104 +157,51 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       'X-Accel-Buffering': 'no',
     });
 
-    const sendEvent = (event: string, data: unknown) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      if (typeof (res as any).flush === 'function') {
-        (res as any).flush();
-      }
-    };
-
     sendEvent('start', { conversationId: id, ragMatchesCount: ragMatches.length });
 
-    // Clean query by removing @tool_name tags
-    const cleanedQuery = content.replace(/@\w+/g, '').trim() || content;
-
-    // 3b. Execute attached Agent Tools or explicit @tool_name user mentions in chat
-    let toolContextString = '';
-    const executedToolResults: string[] = [];
-    const lowerContent = content.toLowerCase();
-
-    // Execute tools when explicitly mentioned via @tool_name or assigned to the agent
-    const mcpToolsToRun = new Set<string>();
-
-    const workspaceTools = await prisma.tool.findMany({
-      where: {
-        OR: [
-          { isCustom: false },
-          { workspaceId },
-        ],
-      },
-    });
-
-    for (const tool of workspaceTools) {
-      if (lowerContent.includes(`@${tool.name.toLowerCase()}`)) {
-        mcpToolsToRun.add(tool.name);
-      }
-    }
-
-    const TOOL_ACTION_MESSAGES: Record<string, string> = {
-      web_search: `Searching the web for "${cleanedQuery}"...`,
-      weather_api: `Fetching live weather data for "${cleanedQuery}"...`,
-    };
-
-    const TOOL_DONE_MESSAGES: Record<string, string> = {
-      web_search: `Searched online web sources`,
-      weather_api: `Retrieved live weather forecast`,
-    };
-
-    for (const toolName of mcpToolsToRun) {
-      const actionMsg = TOOL_ACTION_MESSAGES[toolName] || `Executing ${toolName}...`;
-      sendEvent('tool_start', { toolName, message: actionMsg });
-
-      const result = await executeTool(
-        toolName,
-        { query: cleanedQuery, location: cleanedQuery, endpoint: cleanedQuery },
-        workspaceId
-      );
-
-      const doneMsg = TOOL_DONE_MESSAGES[toolName] || `Executed ${toolName}`;
-      sendEvent('tool_done', { toolName, message: doneMsg, success: result.success });
-
-      if (result.success && result.result) {
-        executedToolResults.push(`[MCP TOOL EXECUTION OUTPUT - ${toolName.toUpperCase()}]\nResult Data:\n${JSON.stringify(result.result, null, 2)}`);
-      }
-    }
-
-    if (executedToolResults.length > 0) {
-      toolContextString = `\n\n--- MCP TOOL EXECUTION RESULTS ---\n${executedToolResults.join('\n\n')}\n--- INSTRUCTION FOR ASSISTANT ---\nIncorporate the tool execution results provided above into your response accurately based on the data returned by the executed tools.`;
-    }
-
-    // 4. Sliding Context Window (Fast & Efficient like ChatGPT: last 14 messages max)
+    // 4. Sliding context window (last 14 messages)
     const SLIDING_WINDOW_SIZE = 14;
     const historyMessages = conversation.messages.slice(-SLIDING_WINDOW_SIZE);
     const previousMessages = historyMessages.map((m) => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
       content: m.content,
     }));
-    previousMessages.push({ role: 'user', content: cleanedQuery });
 
+    previousMessages.push({ role: 'user', content });
+
+    // Build system prompt with RAG context injected
     const baseSystemPrompt = conversation.agent?.systemPrompt || 'You are an intelligent AI Assistant.';
-    const finalSystemPrompt = `${baseSystemPrompt}${toolContextString}`;
+    let finalSystemPrompt = baseSystemPrompt;
+    if (ragContextString.trim().length > 0) {
+      finalSystemPrompt += `\n\n--- RETRIEVED DOCUMENT EXCERPTS (CHUNKS) ---\nNote: The items below are text excerpts (chunks) retrieved from workspace/agent documents. Multiple excerpts may belong to the same document file.\n\n${ragContextString.trim()}\n--- END EXCERPTS ---`;
+    }
 
-    sendEvent('start', {
-      conversationId: id,
-      ragMatchesCount: ragMatches.length,
-    });
+    const targetModel = conversation.agent?.model || 'llama-3.3-70b-versatile';
+    const targetTemperature = conversation.agent?.temperature ?? 0.7;
 
-    // 5. Stream completion from Groq API (returns exact API usage metrics)
-    const streamOutput = await streamGroqCompletion({
+    const toolIds = conversation.agent?.agentTools?.map((at: any) => at.toolId) || [];
+
+    // 5. Pure LangChain Tool Agent Streaming Execution
+    const finalResponseText = await runPureLangChainToolAgentStream({
+      workspaceId,
+      agentId,
       systemPrompt: finalSystemPrompt,
-      ragContext: ragContextString,
+      model: targetModel,
+      temperature: targetTemperature,
       messages: previousMessages,
-      model: conversation.agent?.model || 'llama-3.3-70b-versatile',
-      temperature: conversation.agent?.temperature ?? 0.7,
+      toolIds,
       onChunk: (chunkText) => {
         sendEvent('chunk', { content: chunkText });
       },
+      onToolStart: (toolName, message) => {
+        sendEvent('tool_start', { toolName, message });
+      },
+      onToolDone: (toolName, message, success) => {
+        sendEvent('tool_done', { toolName, message, success });
+      },
     });
 
-    const finalResponseText = streamOutput.text.trim();
-    const tokenUsage = streamOutput.usage;
+    const tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
     const MAX_CONTEXT_TOKENS = 128000;
     const contextStats = {
@@ -232,7 +211,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
       percentage: Number(((tokenUsage.totalTokens / MAX_CONTEXT_TOKENS) * 100).toFixed(2)),
     };
 
-    // 6. Store final assistant message with citations & token usage metadata
+    // 6. Store final assistant message with citations & token usage
     const assistantMsg = await addMessage(
       id,
       workspaceId,
@@ -252,8 +231,26 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     });
     res.end();
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`);
+    const errMessage = error instanceof Error ? error.message : 'An error occurred while processing your request.';
+    console.error('[streamChatHandler] Unhandled stream execution error:', error);
+    try {
+      const fallbackText = `I encountered a temporary issue while processing your request (${errMessage}). Please try again.`;
+      sendEvent('chunk', { content: fallbackText });
+      const assistantMsg = await addMessage(
+        id,
+        workspaceId,
+        req.user.id,
+        'assistant',
+        fallbackText
+      );
+      sendEvent('done', {
+        messageId: assistantMsg.id,
+        content: fallbackText,
+        tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      });
+    } catch {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: errMessage })}\n\n`);
+    }
     res.end();
   }
 };

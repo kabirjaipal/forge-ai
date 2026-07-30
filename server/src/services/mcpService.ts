@@ -1,9 +1,14 @@
+import { createRequire } from 'module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import prisma from '../lib/prisma.js';
+import { generateExpandedSearchQueries } from './groqService.js';
+
+const require = createRequire(import.meta.url);
+const google = require('googlethis');
 
 export interface McpToolResult {
   content: Array<{ type: 'text'; text: string }>;
@@ -102,7 +107,7 @@ export class ForgeAIMcpServer {
     try {
       switch (toolName) {
         case 'web_search': {
-          let rawQuery = (args['query'] || args['q'] || '') as string;
+          const rawQuery = (args['query'] || args['q'] || '') as string;
           const cleanQuery = rawQuery
             .replace(/^@\w+\s*/, '')
             .replace(/^(?:search online for|search web for|search for|google|find)\s*/i, '')
@@ -112,79 +117,115 @@ export class ForgeAIMcpServer {
             return { isError: true, content: [{ type: 'text', text: 'Error: Search query is required.' }] };
           }
 
-          const results: Array<{ title: string; snippet: string; link: string }> = [];
+          const searchQueries = await generateExpandedSearchQueries(cleanQuery);
+          const resultsMap = new Map<string, { title: string; snippet: string; link: string }>();
 
-          // 1. Live DuckDuckGo Web Search
-          try {
-            const ddgRes = await globalThis.fetch(
-              `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`,
-              {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                  'Accept-Language': 'en-US,en;q=0.5',
-                },
-              }
-            );
+          const searchSingleQuery = async (q: string) => {
+            let ddgCount = 0;
+            let googleCount = 0;
 
-            if (ddgRes.ok) {
-              const html = await ddgRes.text();
-              const matches = html.matchAll(
-                /<a[^>]+class="result__snippet"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-              );
-
-              for (const m of matches) {
-                let link = m[1] || '';
-                if (link.includes('uddg=')) {
-                  const u = link.match(/uddg=([^&]+)/);
-                  if (u && u[1]) link = decodeURIComponent(u[1]);
-                }
-                const snippet = m[2]?.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").trim() || '';
-
-                let title = link.split('/')[2]?.replace('www.', '') || 'Web Source';
-                if (link.includes('wikipedia.org')) {
-                  const page = link.split('/').pop()?.replace(/_/g, ' ');
-                  if (page) title = decodeURIComponent(page);
-                } else if (link.includes('.gov')) {
-                  title = 'Official Government Portal';
-                }
-
-                if (snippet && link && !results.some((r) => r.link === link)) {
-                  results.push({ title, snippet, link });
-                }
-              }
-            }
-          } catch {
-            // Ignore DDG network errors
-          }
-
-          // 2. Wikipedia Search API if DDG returned empty
-          if (results.length === 0) {
+            // 1. Primary Engine: DuckDuckGo HTML with Full Browser Headers
             try {
-              const wikiRes = await globalThis.fetch(
-                `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&format=json&origin=*`
-              );
-              if (wikiRes.ok) {
-                const wikiData = (await wikiRes.json()) as {
-                  query?: { search?: Array<{ title: string; snippet: string }> };
-                };
-                const items = wikiData.query?.search || [];
-                for (const item of items.slice(0, 5)) {
-                  const title = item.title;
-                  const snippet = item.snippet.replace(/<[^>]+>/g, '').trim();
-                  const link = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
-                  results.push({ title, snippet, link });
+              const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
+              const res = await globalThis.fetch(url, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Cache-Control': 'no-cache',
+                  'Pragma': 'no-cache',
+                  'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                  'Sec-Ch-Ua-Mobile': '?0',
+                  'Sec-Ch-Ua-Platform': '"Linux"',
+                  'Sec-Fetch-Dest': 'document',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'none',
+                  'Sec-Fetch-User': '?1',
+                  'Upgrade-Insecure-Requests': '1',
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                },
+              });
+
+              if (res.ok) {
+                const html = await res.text();
+                const titleMatches = Array.from(
+                  html.matchAll(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)
+                );
+                const snippetMatches = Array.from(
+                  html.matchAll(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)
+                );
+
+                ddgCount = titleMatches.length;
+
+                for (let i = 0; i < titleMatches.length; i++) {
+                  const titleMatch = titleMatches[i];
+                  if (!titleMatch) continue;
+
+                  let link = titleMatch[1]?.trim() || '';
+                  if (link.includes('uddg=')) {
+                    const u = link.match(/uddg=([^&]+)/);
+                    if (u && u[1]) link = decodeURIComponent(u[1]);
+                  }
+
+                  const title = titleMatch[2]
+                    ?.replace(/<[^>]+>/g, '')
+                    .replace(/&#x27;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&amp;/g, '&')
+                    .trim() || '';
+
+                  const snippetMatch = snippetMatches[i];
+                  const snippet = snippetMatch?.[1]
+                    ? snippetMatch[1]
+                        .replace(/<[^>]+>/g, '')
+                        .replace(/&#x27;/g, "'")
+                        .replace(/&quot;/g, '"')
+                        .replace(/&amp;/g, '&')
+                        .trim()
+                    : '';
+
+                  if (link && title && link.startsWith('http') && !resultsMap.has(link)) {
+                    resultsMap.set(link, { title, snippet: snippet || 'Live web search result', link });
+                  }
                 }
               }
-            } catch {
-              // Ignore
+            } catch (err: any) {
+              console.error(`[WebSearch] DuckDuckGo search error for query "${q}":`, err);
             }
-          }
+
+            // 2. Secondary Engine: googlethis
+            try {
+              const searchRes = await google.search(q, {
+                page: 0,
+                safe: false,
+                parse_ads: false,
+              });
+
+              if (searchRes && searchRes.results && searchRes.results.length > 0) {
+                googleCount = searchRes.results.length;
+                for (const item of searchRes.results) {
+                  if (item.title && item.url && item.url.startsWith('http') && !resultsMap.has(item.url)) {
+                    resultsMap.set(item.url, {
+                      title: item.title.trim(),
+                      snippet: item.description ? item.description.trim() : 'Google web search result',
+                      link: item.url,
+                    });
+                  }
+                }
+              }
+            } catch (err: any) {
+              console.error(`[WebSearch] googlethis error for query "${q}":`, err);
+            }
+
+          };
+
+          await Promise.all(searchQueries.map((q: string) => searchSingleQuery(q)));
+          const results = Array.from(resultsMap.values());
 
           if (results.length === 0) {
             return {
               isError: true,
-              content: [{ type: 'text', text: `No live search results found for query: "${cleanQuery}".` }],
+              content: [{ type: 'text', text: `No live search results found for: "${cleanQuery}".` }],
             };
           }
 
@@ -194,9 +235,9 @@ export class ForgeAIMcpServer {
                 type: 'text',
                 text: JSON.stringify(
                   {
-                    query: cleanQuery,
+                    expandedQueries: searchQueries,
                     searchResultsCount: results.length,
-                    searchResults: results.slice(0, 6),
+                    searchResults: results.slice(0, 12),
                   },
                   null,
                   2
