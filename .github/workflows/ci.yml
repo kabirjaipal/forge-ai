@@ -55,7 +55,7 @@ jobs:
 
       - name: Build Next.js App
         env:
-          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1' }}
         run: |
           cd client
           npm run build
