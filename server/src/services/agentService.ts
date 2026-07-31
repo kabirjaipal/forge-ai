@@ -64,7 +64,7 @@ export async function createAgent(input: CreateAgentInput) {
   const { workspaceId, userId, name, description, systemPrompt, model, temperature, isPublic, documentIds, toolIds } = input;
   await assertWorkspaceMember(workspaceId, userId);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: Parameters<Parameters<typeof prisma['$transaction']>[0]>[0]) => {
     const agent = await tx.agent.create({
       data: {
         workspaceId,
@@ -105,7 +105,7 @@ export async function updateAgent(id: string, workspaceId: string, userId: strin
 
   const { documentIds, toolIds, ...agentData } = input;
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: Parameters<Parameters<typeof prisma['$transaction']>[0]>[0]) => {
     const updated = await tx.agent.update({
       where: { id },
       data: {

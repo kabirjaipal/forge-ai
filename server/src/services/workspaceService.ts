@@ -26,7 +26,7 @@ export async function getUserWorkspaces(userId: string) {
     orderBy: { createdAt: 'desc' },
   });
 
-  return members.map((m) => ({
+  return members.map((m: (typeof members)[number]) => ({
     id: m.workspace.id,
     name: m.workspace.name,
     slug: m.workspace.slug,
@@ -49,7 +49,7 @@ export async function createUserWorkspace(input: CreateWorkspaceInput) {
     throw error;
   }
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: Parameters<Parameters<typeof prisma['$transaction']>[0]>[0]) => {
     const ws = await tx.workspace.create({
       data: {
         name,

@@ -33,9 +33,14 @@ export const uploadMiddleware = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 }).single('file');
 
+function getParamStr(param: string | string[] | undefined): string {
+  if (!param) return '';
+  return Array.isArray(param) ? (param[0] || '') : param;
+}
+
 export const listDocuments = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const docs = await getDocuments(workspaceId, req.user.id);
   res.json({ success: true, data: docs });
 });
@@ -74,7 +79,7 @@ export const uploadDocument = (req: AuthRequest, res: Response) => {
     }
 
     try {
-      const workspaceId = req.params['workspaceId']!;
+      const workspaceId = getParamStr(req.params['workspaceId']);
       const ext = getExtension(req.file.originalname);
       const fileKey = `${uuidv4()}.${ext}`;
 

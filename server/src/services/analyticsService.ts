@@ -36,10 +36,10 @@ export async function getWorkspaceAnalytics(workspaceId: string): Promise<Analyt
     orderBy: { createdAt: 'desc' },
   });
 
-  const totalCharCount = messages.reduce((acc, m) => acc + (m.content?.length || 0), 0);
+  const totalCharCount = messages.reduce((acc: number, m: { content: string }) => acc + (m.content?.length || 0), 0);
   const estimatedTokenUsage = Math.round(totalCharCount / 4) + msgCount * 150;
 
-  const recentActivity = messages.slice(0, 5).map((m) => ({
+  const recentActivity = messages.slice(0, 5).map((m: { id: string; content: string; createdAt: Date }) => ({
     id: m.id,
     type: 'message' as const,
     title: `Message: "${m.content.slice(0, 40)}..."`,

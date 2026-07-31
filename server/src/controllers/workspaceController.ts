@@ -76,7 +76,8 @@ export async function getWorkspace(req: AuthRequest, res: Response): Promise<voi
     return;
   }
 
-  const id = req.params['id'];
+  const rawId = req.params['id'];
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   if (!id) {
     res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Workspace ID required' } });
     return;
@@ -115,7 +116,8 @@ export async function updateWorkspace(req: AuthRequest, res: Response): Promise<
     return;
   }
 
-  const id = req.params['id'];
+  const rawId = req.params['id'];
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   if (!id) {
     res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Workspace ID required' } });
     return;

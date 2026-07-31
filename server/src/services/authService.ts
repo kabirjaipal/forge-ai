@@ -32,7 +32,7 @@ export async function getUserWithWorkspaces(userId: string) {
     email: user.email,
     name: user.name,
     image: user.image,
-    workspaces: user.workspaceMembers.map((m) => ({
+    workspaces: user.workspaceMembers.map((m: (typeof user.workspaceMembers)[number]) => ({
       ...m.workspace,
       role: m.role,
     })),

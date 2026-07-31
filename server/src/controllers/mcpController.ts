@@ -14,7 +14,7 @@ async function getAllMcpTools(workspaceId?: string) {
     },
   });
 
-  return dbTools.map((t) => ({
+  return dbTools.map((t: (typeof dbTools)[number]) => ({
     name: t.name,
     description: t.description,
     inputSchema: t.schema,
@@ -52,7 +52,7 @@ export const handleMcpRpc = asyncHandler(async (req: AuthRequest, res: Response)
       data: {
         server: 'ForgeAI MCP Protocol Server',
         version: '1.0.0',
-        availableTools: tools.map((t) => t.name),
+        availableTools: tools.map((t: { name: string }) => t.name),
       },
     });
     return;

@@ -41,7 +41,7 @@ export async function searchRelevantChunks(
     where: { agentId },
     select: { documentId: true },
   });
-  const documentIds = agentKnowledge.map((ak) => ak.documentId);
+  const documentIds = agentKnowledge.map((ak: { documentId: string }) => ak.documentId);
 
   if (documentIds.length === 0) return [];
 
@@ -121,7 +121,7 @@ export async function searchRelevantChunks(
   }
 
   if (langchainDocs.length === 0) {
-    return chunks.slice(0, topK).map((c) => ({
+    return chunks.slice(0, topK).map((c: (typeof chunks)[number]) => ({
       documentId: c.documentId,
       documentName: c.document.name,
       chunkIndex: c.chunkIndex,
@@ -148,7 +148,7 @@ export async function searchRelevantChunks(
     }));
 
   if (matches.length === 0 && chunks.length > 0) {
-    return chunks.slice(0, topK).map((c) => ({
+    return chunks.slice(0, topK).map((c: (typeof chunks)[number]) => ({
       documentId: c.documentId,
       documentName: c.document.name,
       chunkIndex: c.chunkIndex,

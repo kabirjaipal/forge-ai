@@ -37,10 +37,10 @@ export async function getLangChainTools(workspaceId: string, toolIds?: string[])
       description: 'Search the live web for real-time information, news, current affairs, events, weather, and queries.',
       schema: z.object({
         query: z.string().describe('Search query to look up on the web'),
-      }),
+      }) as any,
     }
   );
-  toolsList.push(webSearchTool);
+  toolsList.push(webSearchTool as unknown as StructuredToolInterface);
 
   // 2. weather_api tool
   const weatherApiTool = tool(
@@ -53,10 +53,10 @@ export async function getLangChainTools(workspaceId: string, toolIds?: string[])
       description: 'Fetch real-time live weather conditions and temperature for any city in the world.',
       schema: z.object({
         location: z.string().describe('City name or location (e.g. London, Tokyo, San Francisco, Jodhpur)'),
-      }),
+      }) as any,
     }
   );
-  toolsList.push(weatherApiTool);
+  toolsList.push(weatherApiTool as unknown as StructuredToolInterface);
 
   // 3. Custom DB registered tools
   const customWhere = toolIds && toolIds.length > 0
@@ -89,10 +89,10 @@ export async function getLangChainTools(workspaceId: string, toolIds?: string[])
       {
         name: customTool.name,
         description: customTool.description || `Tool ${customTool.name}`,
-        schema: z.object(propertySchema).passthrough(),
+        schema: z.object(propertySchema).passthrough() as any,
       }
     );
-    toolsList.push(dynamicTool);
+    toolsList.push(dynamicTool as unknown as StructuredToolInterface);
   }
 
   return toolsList;

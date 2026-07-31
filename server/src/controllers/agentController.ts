@@ -25,9 +25,19 @@ const createAgentSchema = z.object({
 
 const updateAgentSchema = createAgentSchema.partial();
 
+function getParamStr(param: string | string[] | undefined): string {
+  if (!param) return '';
+  return Array.isArray(param) ? (param[0] || '') : param;
+}
+
+function getParamStrOpt(param: string | string[] | undefined): string | undefined {
+  if (!param) return undefined;
+  return Array.isArray(param) ? param[0] : param;
+}
+
 export const listAgents = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const agents = await getAgents(workspaceId, req.user.id);
   res.json({ success: true, data: agents });
 });
@@ -41,7 +51,7 @@ export const getAgent = asyncHandler(async (req: AuthRequest, res: Response) => 
 
 export const createAgentHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const parsed = createAgentSchema.safeParse(req.body);
   if (!parsed.success) {
     const msg = parsed.error.issues[0]?.message || 'Validation failed';
@@ -71,7 +81,7 @@ export const deleteAgentHandler = asyncHandler(async (req: AuthRequest, res: Res
 });
 
 export const listTools = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const workspaceId = req.params['workspaceId'];
+  const workspaceId = getParamStrOpt(req.params['workspaceId']);
   const tools = await getTools(workspaceId);
   res.json({ success: true, data: tools });
 });

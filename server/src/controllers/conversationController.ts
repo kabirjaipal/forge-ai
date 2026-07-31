@@ -31,9 +31,14 @@ const addMessageSchema = z.object({
   toolCalls: z.array(z.any()).optional(),
 });
 
+function getParamStr(param: string | string[] | undefined): string {
+  if (!param) return '';
+  return Array.isArray(param) ? (param[0] || '') : param;
+}
+
 export const listConversations = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const convos = await getConversations(workspaceId, req.user.id);
   res.json({ success: true, data: convos });
 });
@@ -47,7 +52,7 @@ export const getConversation = asyncHandler(async (req: AuthRequest, res: Respon
 
 export const createConversationHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const parsed = createConvoSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError(parsed.error.issues[0]?.message || 'Validation failed', 400, 'VALIDATION_ERROR');
@@ -76,7 +81,7 @@ export const deleteConversationHandler = asyncHandler(async (req: AuthRequest, r
 
 export const deleteAllConversationsHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   await deleteAllConversations(workspaceId, req.user.id);
   res.json({ success: true, data: { deletedAll: true } });
 });
@@ -162,7 +167,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     // 4. Sliding context window (last 14 messages)
     const SLIDING_WINDOW_SIZE = 14;
     const historyMessages = conversation.messages.slice(-SLIDING_WINDOW_SIZE);
-    const previousMessages = historyMessages.map((m) => ({
+    const previousMessages = historyMessages.map((m: (typeof historyMessages)[number]) => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'assistant' | 'user',
       content: m.content,
     }));
@@ -257,7 +262,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
 
 export const getAnalyticsHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.user) throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
-  const workspaceId = req.params['workspaceId']!;
+  const workspaceId = getParamStr(req.params['workspaceId']);
   const analytics = await getAnalytics(workspaceId, req.user.id);
   res.json({ success: true, data: analytics });
 });
