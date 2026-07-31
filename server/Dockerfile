@@ -10,7 +10,7 @@ RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /v
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY tsconfig.json ./
