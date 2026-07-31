@@ -119,7 +119,7 @@ export interface LangChainAgentStreamOutput {
  * Features automatic fallback to llama-3.1-8b-instant on Groq TPM rate limits.
  */
 export async function runPureLangChainToolAgentStream(input: LangChainAgentStreamInput): Promise<LangChainAgentStreamOutput> {
-  const { workspaceId, agentId, systemPrompt, model, temperature, messages, toolIds, onChunk, onToolStart, onToolDone } = input;
+  const { workspaceId, systemPrompt, model, temperature, messages, toolIds, onChunk, onToolStart, onToolDone } = input;
 
   // 1. Build LangChain tools
   const tools = await getLangChainTools(workspaceId, toolIds);
