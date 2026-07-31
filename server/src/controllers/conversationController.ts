@@ -187,7 +187,7 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
     const toolIds = conversation.agent?.agentTools?.map((at: any) => at.toolId) || [];
 
     // 5. Pure LangChain Tool Agent Streaming Execution
-    const finalResponseText = await runPureLangChainToolAgentStream({
+    const { text: finalResponseText, tokenUsage } = await runPureLangChainToolAgentStream({
       workspaceId,
       agentId,
       systemPrompt: finalSystemPrompt,
@@ -205,8 +205,6 @@ export const streamChatHandler = async (req: AuthRequest, res: Response) => {
         sendEvent('tool_done', { toolName, message, success });
       },
     });
-
-    const tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
     const MAX_CONTEXT_TOKENS = 128000;
     const contextStats = {

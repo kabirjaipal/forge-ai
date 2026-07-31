@@ -96,6 +96,9 @@ async function startServer() {
   try {
     const server = app.listen(config.PORT, config.HOST, () => {
       logger.info(`🚀 Server listening at http://${config.HOST}:${config.PORT} (${config.NODE_ENV})`);
+      if (config.LANGSMITH_TRACING === 'true' && config.LANGSMITH_API_KEY) {
+        logger.info(`📊 LangSmith Tracing enabled (Project: ${config.LANGSMITH_PROJECT || 'forge-ai'})`);
+      }
       // Seed default tools in background (non-blocking)
       seedTools().catch((err) => logger.error({ err }, 'Tool seeding failed'));
       initQueues();
