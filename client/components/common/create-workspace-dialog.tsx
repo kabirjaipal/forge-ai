@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Layers, Plus, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Plus, Loader2 } from 'lucide-react';
 import { useAuth, type Workspace } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';

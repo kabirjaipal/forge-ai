@@ -1,5 +1,7 @@
 import { Document } from '@langchain/core/documents';
 import { MemoryVectorStore } from '@langchain/classic/vectorstores/memory';
+import { PGVectorStore } from '@langchain/pgvector';
+import pg from 'pg';
 import prisma from '../lib/prisma.js';
 import { createLangChainEmbeddings } from './embeddingService.js';
 
@@ -11,11 +13,20 @@ export interface RAGMatch {
   score: number;
 }
 
+let pgPool: pg.Pool | null = null;
+function getPgPool(): pg.Pool | null {
+  const dbUrl = process.env['DATABASE_URL'];
+  if (!dbUrl) return null;
+  if (!pgPool) {
+    pgPool = new pg.Pool({ connectionString: dbUrl });
+  }
+  return pgPool;
+}
+
 /**
- * Searches for top-K document chunks across agent-linked documents
- * using LangChain MemoryVectorStore — eliminates manual cosine similarity loop.
- * Chunks are loaded from DB, reconstructed as LangChain Documents, then
- * similarity search is delegated entirely to LangChain.
+ * Searches for top-K document chunks across agent-linked documents using LangChain.
+ * Prefers native PostgreSQL vector search via @langchain/pgvector when DATABASE_URL is active,
+ * falling back to in-memory LangChain MemoryVectorStore.
  */
 export async function searchRelevantChunks(
   _workspaceId: string,
@@ -34,7 +45,41 @@ export async function searchRelevantChunks(
 
   if (documentIds.length === 0) return [];
 
-  // 2. Fetch all chunks for target agent documents
+  const embeddings = createLangChainEmbeddings();
+  const pool = getPgPool();
+
+  // Attempt native PostgreSQL @langchain/pgvector similarity search
+  if (pool) {
+    try {
+      const pgVectorStore = await PGVectorStore.initialize(embeddings, {
+        postgresConnectionOptions: { connectionString: process.env['DATABASE_URL'] },
+        tableName: 'DocumentChunk',
+        columns: {
+          idColumnName: 'id',
+          vectorColumnName: 'embedding',
+          contentColumnName: 'content',
+        },
+      });
+
+      const pgResults = await pgVectorStore.similaritySearchWithScore(query, topK, {
+        documentId: { in: documentIds },
+      });
+
+      if (pgResults && pgResults.length > 0) {
+        return pgResults.map(([doc, score]) => ({
+          documentId: (doc.metadata['documentId'] as string) || '',
+          documentName: (doc.metadata['documentName'] as string) || 'Document',
+          chunkIndex: (doc.metadata['chunkIndex'] as number) || 0,
+          content: doc.pageContent,
+          score: Math.round(score * 1000) / 1000,
+        }));
+      }
+    } catch {
+      // Fallback to chunk retrieval if pgvector extension isn't initialized on table
+    }
+  }
+
+  // 2. Fetch all chunks for target agent documents (fallback mode)
   const chunks = await prisma.documentChunk.findMany({
     where: { documentId: { in: documentIds } },
     include: { document: { select: { name: true } } },
@@ -76,7 +121,6 @@ export async function searchRelevantChunks(
   }
 
   if (langchainDocs.length === 0) {
-    // Fallback: return top initial chunks if no embeddings are stored yet
     return chunks.slice(0, topK).map((c) => ({
       documentId: c.documentId,
       documentName: c.document.name,
@@ -86,15 +130,13 @@ export async function searchRelevantChunks(
     }));
   }
 
-  // 4. Build MemoryVectorStore from pre-computed embeddings (no re-embedding needed)
-  const embeddings = createLangChainEmbeddings();
+  // 4. Build MemoryVectorStore from pre-computed embeddings
   const vectorStore = await MemoryVectorStore.fromExistingIndex(embeddings);
   await vectorStore.addVectors(precomputedEmbeddings, langchainDocs);
 
-  // 5. Similarity search via LangChain — cosine similarity handled internally
+  // 5. Similarity search via LangChain MemoryVectorStore
   const results = await vectorStore.similaritySearchWithScore(query, topK);
 
-  // Filter noise and map to RAGMatch shape
   const matches: RAGMatch[] = results
     .filter(([, score]) => score > 0.05)
     .map(([doc, score]) => ({
@@ -105,7 +147,6 @@ export async function searchRelevantChunks(
       score: Math.round(score * 1000) / 1000,
     }));
 
-  // Fallback: if no chunks passed the threshold, return top-K initial chunks
   if (matches.length === 0 && chunks.length > 0) {
     return chunks.slice(0, topK).map((c) => ({
       documentId: c.documentId,
@@ -118,3 +159,4 @@ export async function searchRelevantChunks(
 
   return matches;
 }
+

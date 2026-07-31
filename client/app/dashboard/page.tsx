@@ -1,18 +1,15 @@
 'use client';
 
-import React from 'react';
 import Link from 'next/link';
 import {
   FileText,
   Bot,
   MessageSquare,
-  Zap,
   ArrowUpRight,
   Database,
   Activity,
   Sparkles,
   Plus,
-  ShieldCheck,
   Clock,
   ChevronRight,
   FileCheck,

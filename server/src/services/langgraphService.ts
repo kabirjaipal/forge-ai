@@ -1,6 +1,8 @@
 import { tool, StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
-import { HumanMessage, AIMessage, SystemMessage, ToolMessage, BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, AIMessage, BaseMessage } from '@langchain/core/messages';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { MemorySaver } from '@langchain/langgraph';
 import { createChatGroqModel, extractTextContent } from './groqService.js';
 import { mcpServer } from './mcpService.js';
 import prisma from '../lib/prisma.js';
@@ -66,7 +68,7 @@ export async function getLangChainTools(workspaceId: string, toolIds?: string[])
   for (const customTool of dbTools) {
     if (toolsList.some((t) => t.name === customTool.name)) continue;
 
-    let propertySchema: Record<string, z.ZodTypeAny> = {
+    const propertySchema: Record<string, z.ZodTypeAny> = {
       q: z.string().optional().describe('Search query parameter string (e.g. user:username, language:ts, topic:ai)'),
       query: z.string().optional().describe('Search query string'),
     };
@@ -96,17 +98,21 @@ export async function getLangChainTools(workspaceId: string, toolIds?: string[])
   return toolsList;
 }
 
+
+
+// Persistent in-memory checkpointer for thread-scoped conversation state tracking
+const agentCheckpointer = new MemorySaver();
+
 /**
- * Pure LangChain Autonomous Agent Execution Engine.
- * Enables the AI model to autonomously inspect prompt intent, select the appropriate tools,
- * and dynamically generate parameters (tc.args) matching each tool's Zod/JSON schema.
+ * Pure LangGraph Autonomous Agent Execution Engine.
+ * Built using @langchain/langgraph prebuilt createReactAgent and streamEvents.
+ * Manages tool invocation, state graphs, and streaming response events natively.
  */
 export async function runPureLangChainToolAgentStream(input: LangChainAgentStreamInput): Promise<string> {
-  const { workspaceId, systemPrompt, model, temperature, messages, toolIds, onChunk, onToolStart, onToolDone } = input;
+  const { workspaceId, agentId, systemPrompt, model, temperature, messages, toolIds, onChunk, onToolStart, onToolDone } = input;
 
-  // 1. Build LangChain tools & tool map
+  // 1. Build LangChain tools
   const tools = await getLangChainTools(workspaceId, toolIds);
-  const toolsMap = Object.fromEntries(tools.map((t) => [t.name, t]));
 
   // 2. Create ChatGroq model
   const chatModel = createChatGroqModel(model, temperature ?? 0.7);
@@ -114,10 +120,6 @@ export async function runPureLangChainToolAgentStream(input: LangChainAgentStrea
   // 3. Construct LangChain BaseMessage history
   const lastUserMsg = messages[messages.length - 1]?.content || '';
   const langchainMessages: BaseMessage[] = [];
-
-  if (systemPrompt) {
-    langchainMessages.push(new SystemMessage(systemPrompt));
-  }
 
   for (let i = 0; i < messages.length - 1; i++) {
     const m = messages[i]!;
@@ -127,67 +129,65 @@ export async function runPureLangChainToolAgentStream(input: LangChainAgentStrea
 
   langchainMessages.push(new HumanMessage(lastUserMsg));
 
-  // 4. Autonomous AI Tool Calling & Argument Generation
-  // The AI Agent inspects the user prompt and tool schemas, autonomously selecting tools & generating args (tc.args)
-  const toolCallingModel = createChatGroqModel(model, 0.1).bindTools(tools);
+  // 4. Create LangGraph ReAct Agent Graph with Checkpointer
+  const agentGraph = createReactAgent({
+    llm: chatModel,
+    tools,
+    checkpointSaver: agentCheckpointer,
+    ...(systemPrompt ? { stateModifier: systemPrompt } : {}),
+  });
 
-  let aiMsg: AIMessage | null = null;
-  try {
-    aiMsg = await toolCallingModel.invoke(langchainMessages);
-  } catch (err) {
-    console.warn('[runPureLangChainToolAgentStream] Tool binding invoke failed:', err);
-  }
+  const threadId = agentId || workspaceId;
+  const TOOL_ACTION_MESSAGES: Record<string, string> = {
+    web_search: 'Searching the web...',
+    weather_api: 'Fetching live weather data...',
+  };
 
-  if (aiMsg && aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
-    langchainMessages.push(aiMsg);
-
-    const TOOL_ACTION_MESSAGES: Record<string, string> = {
-      web_search: 'Searching the web...',
-      weather_api: 'Fetching live weather data...',
-    };
-
-    for (const tc of aiMsg.tool_calls) {
-      const toolName = tc.name;
-      const targetTool = toolsMap[toolName];
-      if (!targetTool) continue;
-
-      const actionMsg = TOOL_ACTION_MESSAGES[toolName] || `Executing ${toolName}...`;
-      onToolStart?.(toolName, actionMsg);
-
-      let toolResultText = '';
-      let success = true;
-
-      try {
-        // Pass the AI's autonomously generated arguments (tc.args) directly to the tool!
-        const rawRes = await targetTool.invoke(tc.args);
-        toolResultText = typeof rawRes === 'string' ? rawRes : JSON.stringify(rawRes);
-      } catch (err: any) {
-        success = false;
-        toolResultText = `Error executing tool: ${err?.message || 'Tool execution failed'}`;
-      }
-
-      onToolDone?.(toolName, `Executed ${toolName}`, success);
-
-      // Append pure LangChain ToolMessage
-      langchainMessages.push(
-        new ToolMessage({
-          content: toolResultText,
-          tool_call_id: tc.id || toolName,
-        })
-      );
-    }
-  }
-
-  // 5. Stream final response using LangChain ChatGroq model stream
   let fullOutput = '';
-  const stream = await chatModel.stream(langchainMessages);
-  for await (const chunk of stream) {
-    const textChunk = extractTextContent(chunk.content);
-    if (textChunk) {
-      fullOutput += textChunk;
-      await onChunk(textChunk);
+
+  // 5. Execute LangGraph compiled graph using streamEvents (v2)
+  try {
+    const eventStream = await agentGraph.streamEvents(
+      { messages: langchainMessages },
+      {
+        version: 'v2',
+        configurable: { thread_id: threadId },
+      }
+    );
+
+    for await (const event of eventStream) {
+      if (event.event === 'on_chat_model_stream') {
+        const textChunk = extractTextContent(event.data?.chunk?.content);
+        if (textChunk) {
+          fullOutput += textChunk;
+          await onChunk(textChunk);
+        }
+      } else if (event.event === 'on_tool_start') {
+        const toolName = event.name || 'tool';
+        const actionMsg = TOOL_ACTION_MESSAGES[toolName] || `Executing ${toolName}...`;
+        onToolStart?.(toolName, actionMsg);
+      } else if (event.event === 'on_tool_end') {
+        const toolName = event.name || 'tool';
+        const isError = Boolean(event.data?.output?.isError);
+        onToolDone?.(toolName, `Executed ${toolName}`, !isError);
+      }
+    }
+  } catch (err) {
+    console.warn('[runPureLangChainToolAgentStream] LangGraph stream execution fallback:', err);
+    if (!fullOutput) {
+      // Fallback simple invocation if streamEvents encounters unexpected provider stream formats
+      const result = await agentGraph.invoke(
+        { messages: langchainMessages },
+        { configurable: { thread_id: threadId } }
+      );
+      const lastMsg = result.messages[result.messages.length - 1];
+      fullOutput = extractTextContent(lastMsg?.content);
+      if (fullOutput) {
+        await onChunk(fullOutput);
+      }
     }
   }
 
   return fullOutput;
 }
+

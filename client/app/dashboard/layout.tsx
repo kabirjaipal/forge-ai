@@ -17,7 +17,6 @@ import {
   Layers,
   Plus,
   Loader2,
-  X
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';

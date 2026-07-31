@@ -1,5 +1,6 @@
 import { ChatGroq } from '@langchain/groq';
 import { HumanMessage, SystemMessage, AIMessage, BaseMessage } from '@langchain/core/messages';
+import { z } from 'zod';
 
 export interface ChatMessageInput {
   role: 'user' | 'assistant' | 'system';
@@ -170,8 +171,13 @@ export async function fetchAvailableModels(): Promise<Array<{ id: string; name: 
     }));
 }
 
+const SearchQueriesSchema = z.object({
+  queries: z.array(z.string()).describe('3 distinct, targeted search queries for web lookup'),
+});
+
 /**
  * Uses LLM to intelligently generate 2-3 search query variations for Multi-Query Web Expansion.
+ * Uses LangChain's native .withStructuredOutput for schema-guaranteed output.
  */
 export async function generateExpandedSearchQueries(userQuery: string): Promise<string[]> {
   const clean = userQuery
@@ -183,30 +189,26 @@ export async function generateExpandedSearchQueries(userQuery: string): Promise<
 
   try {
     const chatModel = createChatGroqModel('llama-3.1-8b-instant', 0.2);
+    const structuredModel = chatModel.withStructuredOutput(SearchQueriesSchema);
+
     const systemInstruction = new SystemMessage(
-      `You are an AI Search Query Optimizer. Generate 3 distinct, targeted search queries for Google to find comprehensive results for the user's intent. Output strictly a raw JSON array of strings without markdown formatting. Example: ["query 1", "query 2", "query 3"]`
+      `You are an AI Search Query Optimizer. Generate 3 distinct, targeted search queries for web search engines to find comprehensive results for the user's intent.`
     );
     const userMsg = new HumanMessage(clean);
 
-    const response = await chatModel.invoke([systemInstruction, userMsg]);
-    const responseText = extractTextContent(response.content).trim();
-
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const expanded = parsed.map((q: any) => String(q).trim()).filter(Boolean);
-        if (!expanded.includes(clean)) {
-          expanded.unshift(clean);
-        }
-        return expanded;
+    const result = await structuredModel.invoke([systemInstruction, userMsg]);
+    if (result && Array.isArray(result.queries) && result.queries.length > 0) {
+      const expanded = result.queries.map((q) => String(q).trim()).filter(Boolean);
+      if (!expanded.includes(clean)) {
+        expanded.unshift(clean);
       }
+      return expanded;
     }
-    console.warn(`[QueryExpansion] Could not parse JSON array from LLM response.`);
   } catch (err) {
-    console.error('[QueryExpansion] Query expansion error:', err);
+    console.error('[QueryExpansion] Structured query expansion error:', err);
   }
 
   return [clean];
 }
+
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Settings, Save, AlertTriangle, Loader2, CheckCircle2, Users, Layers, Trash2 } from 'lucide-react';
+import { Settings, Save, AlertTriangle, Loader2, CheckCircle2, Users, Layers } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';

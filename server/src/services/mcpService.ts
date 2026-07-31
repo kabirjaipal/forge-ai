@@ -121,9 +121,6 @@ export class ForgeAIMcpServer {
           const resultsMap = new Map<string, { title: string; snippet: string; link: string }>();
 
           const searchSingleQuery = async (q: string) => {
-            let ddgCount = 0;
-            let googleCount = 0;
-
             // 1. Primary Engine: DuckDuckGo HTML with Full Browser Headers
             try {
               const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
@@ -154,8 +151,6 @@ export class ForgeAIMcpServer {
                 const snippetMatches = Array.from(
                   html.matchAll(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)
                 );
-
-                ddgCount = titleMatches.length;
 
                 for (let i = 0; i < titleMatches.length; i++) {
                   const titleMatch = titleMatches[i];
@@ -202,7 +197,6 @@ export class ForgeAIMcpServer {
               });
 
               if (searchRes && searchRes.results && searchRes.results.length > 0) {
-                googleCount = searchRes.results.length;
                 for (const item of searchRes.results) {
                   if (item.title && item.url && item.url.startsWith('http') && !resultsMap.has(item.url)) {
                     resultsMap.set(item.url, {
@@ -327,9 +321,9 @@ export class ForgeAIMcpServer {
             headers = { ...headers, ...(dbTool.headers as Record<string, string>) };
           }
 
-          let response: Response;
+          let response: globalThis.Response;
           if (method === 'GET') {
-            const queryParams = new URLSearchParams(args as Record<string, string>).toString();
+            const queryParams = new globalThis.URLSearchParams(args as Record<string, string>).toString();
             const fullUrl = dbTool.url.includes('?') ? `${dbTool.url}&${queryParams}` : `${dbTool.url}?${queryParams}`;
             response = await globalThis.fetch(fullUrl, { method: 'GET', headers });
           } else {

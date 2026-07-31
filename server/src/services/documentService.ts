@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { createRequire } from 'module';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { WebPDFLoader } from '@langchain/community/document_loaders/web/pdf';
 import prisma from '../lib/prisma.js';
 
 const require = createRequire(import.meta.url);
@@ -50,6 +51,7 @@ function sanitizeUtf8Text(input: string): string {
     : input.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 
   // 2. Remove null bytes and non-printable control characters
+  // eslint-disable-next-line no-control-regex
   return safe.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
 }
 
@@ -173,10 +175,13 @@ export async function processDocumentAsync(documentId: string) {
       const buffer = await getFileBufferFromStorage(doc.fileKey);
       if (doc.fileType.toLowerCase() === 'pdf') {
         try {
+          const blob = new globalThis.Blob([buffer], { type: 'application/pdf' });
+          const loader = new WebPDFLoader(blob, { splitPages: false });
+          const docs = await loader.load();
+          rawText = docs.map((d) => d.pageContent).join('\n\n');
+        } catch {
           const pdfData = await pdfParse(buffer);
           rawText = pdfData.text || '';
-        } catch {
-          rawText = buffer.toString('utf-8');
         }
       } else {
         rawText = buffer.toString('utf-8');

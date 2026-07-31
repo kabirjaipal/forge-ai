@@ -1,6 +1,4 @@
 'use client';
-
-import React from 'react';
 import { FileText, Bot, MessageSquare, Activity, Clock, Zap, Layers } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useAnalytics } from '@/lib/hooks/useAnalytics';
